@@ -129,4 +129,9 @@ export interface SyncOptions {
      * File extensions to sync. Default `['.md', '.txt', '.html']`.
      */
     extensions?: string[];
+
+    /**
+     * Watch debounce in milliseconds. Default 500.
+     */
+    debounceMs?: number;
 }

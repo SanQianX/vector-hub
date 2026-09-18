@@ -291,6 +291,7 @@ export class VectorHub {
             index,
             paths: [path.resolve(sourceDir)],
             extensions: options?.extensions ?? ['.md', '.txt', '.html'],
+            debounceMs: options?.debounceMs,
         });
         await new Promise<void>((resolve, reject) => {
             watcher.once('ready', resolve);

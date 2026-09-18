@@ -19,7 +19,9 @@ async function main(): Promise<void> {
         return i >= 0 ? args[i + 1] : undefined;
     };
 
-    const manager = await HubManager.load(get('root') ?? process.env.VECTOR_HUB_ROOT ?? './data');
+    const manager = await HubManager.load({
+        rootPath: get('root') ?? process.env.VECTOR_HUB_ROOT,
+    });
     const hub = manager.hub;
 
     switch (command) {
