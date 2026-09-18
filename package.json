@@ -1,0 +1,41 @@
+{
+  "name": "vector-hub",
+  "version": "0.1.0",
+  "description": "Generic multi-project vector retrieval library (built on Vectra) with a pluggable HTTP layer and a built-in visual console. Embed it into any project; the UI and AI agents share the same /api/search path.",
+  "license": "MIT",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/cjs/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/cjs/index.d.ts",
+      "require": "./dist/cjs/index.js",
+      "import": "./dist/esm/index.js"
+    }
+  },
+  "bin": {
+    "vector-hub": "./dist/cjs/bin.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node -e \"require('fs').writeFileSync('dist/esm/package.json', JSON.stringify({ type: 'module' }))\"",
+    "test": "ts-mocha \"test/**/*.spec.ts\" --timeout 20000",
+    "serve": "tsx src/bin.ts serve",
+    "sync": "tsx src/bin.ts sync",
+    "watch": "tsx src/bin.ts watch",
+    "seed": "tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "vectra": "file:../vectra"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^25.5.0",
+    "mocha": "11.7.5",
+    "ts-mocha": "11.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.3"
+  }
+}

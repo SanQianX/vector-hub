@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>vector-hub · 设计预览 v3（边界场景完整版）</title>
+<style>
+  /* ZCode 风格 token：灰阶四层 + 单一蓝色 + 语义红绿 */
+  :root {
+    --bg-side: #1b1c1f;
+    --bg-main: #212226;
+    --bg-card: #2a2b30;
+    --bg-input: #333439;
+    --bg-hover: #303237;
+    --bg-active: #36383e;
+    --line: #3a3b40;
+    --text: #e8e8ea;
+    --text-2: #a0a1a5;
+    --text-3: #6b6c70;
+    --label: #8a8b90;
+    --blue: #3b82f6;
+    --green: #34d399;
+    --red: #e5695e;
+    --mono: Consolas, "Microsoft YaHei", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; transition: background-color .12s ease, color .12s ease, border-color .12s ease, opacity .12s ease; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg-main); color: var(--text);
+    font: 13px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #45464b; border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  .svg-i { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
+  *:focus-visible { outline: 1px solid var(--blue); outline-offset: 1px; border-radius: 6px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+  #app { flex: 1; display: flex; min-height: 0; }
+  aside { width: 248px; min-width: 248px; background: var(--bg-side); display: flex; flex-direction: column; }
+  .brand { display: flex; align-items: center; gap: 8px; padding: 14px 14px 10px; }
+  .brand .mark { width: 22px; height: 22px; border-radius: 6px; background: var(--text); color: #16171a; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .brand .name { font-size: 13px; font-weight: 600; }
+  .brand .name em { font-style: normal; color: var(--text-3); font-weight: 400; }
+
+  .side-scroll { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+
+  /* 项目过滤框（项目多时出现） */
+  .proj-filter {
+    display: flex; align-items: center; gap: 6px; height: 28px;
+    background: var(--bg-input); border-radius: 7px; padding: 0 8px;
+    color: var(--text-3); margin: 2px 0 4px;
+  }
+  .proj-filter input { flex: 1; border: none; background: none; outline: none; color: var(--text); font-size: 12px; min-width: 0; }
+  .proj-filter input::placeholder { color: var(--text-3); }
+
+  .group-label { font-size: 11px; color: var(--label); letter-spacing: .05em; padding: 8px 8px 6px; display: flex; align-items: center; gap: 6px; }
+  .group-label .sel { color: var(--text-3); font-family: var(--mono); font-weight: 400; }
+  .group-label .grow { flex: 1; }
+  .group-label .op { color: var(--text-3); font-size: 11px; padding: 0 2px; }
+  .group-label .op:hover { color: var(--text); }
+
+  .proj { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px; color: var(--text-2); cursor: pointer; user-select: none; }
+  .proj:hover { background: var(--bg-hover); color: var(--text); }
+  .proj.on { background: var(--bg-active); color: var(--text); }
+  .proj .cb { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--line); flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #16171a; }
+  .proj.on .cb { background: var(--text); border-color: var(--text); }
+  .proj .cb .svg-i { display: none; }
+  .proj.on .cb .svg-i { display: block; }
+  .proj .pn { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+  .proj .cnt { font-size: 11px; font-family: var(--mono); color: var(--text-3); }
+  .proj .watch-ic { color: var(--text-3); }
+  .proj .del { opacity: 0; width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--text-3); }
+  .proj:hover .del { opacity: 1; }
+  .proj .del:hover { color: var(--red); background: rgba(229,105,94,.1); }
+
+  .import-row { margin-top: 6px; height: 32px; border: 1px dashed var(--line); border-radius: 6px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--text-3); font-size: 12px; cursor: pointer; width: 100%; }
+  .import-row:hover { color: var(--text); border-color: var(--text-3); }
+
+  /* 侧栏空态（0 项目） */
+  .side-empty { border: 1px dashed var(--line); border-radius: 9px; margin-top: 8px; padding: 20px 12px; text-align: center; color: var(--text-3); }
+  .side-empty .tile { width: 32px; height: 32px; border-radius: 8px; background: var(--bg-card); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 6px; }
+  .side-empty .t1 { font-size: 12px; color: var(--text-2); }
+  .side-empty .t2 { font-size: 11px; margin-top: 2px; }
+
+  .side-foot { padding: 10px 14px; display: flex; align-items: center; gap: 8px; }
+  .side-foot .dot { width: 6px; height: 6px; border-radius: 99px; background: var(--green); }
+  .side-foot .dot.warn { background: var(--text-2); }
+  .side-foot .st { font-size: 11px; color: var(--text-3); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .icon-btn { width: 24px; height: 24px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+  .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .topbar { display: flex; align-items: center; gap: 10px; padding: 10px 20px; }
+  .topbar h1 { font-size: 14px; font-weight: 600; }
+  .topbar .sub { font-size: 11px; color: var(--text-3); font-family: var(--mono); }
+  .topbar .grow { flex: 1; }
+
+  /* 全局提示条（未配置 / 重建中） */
+  .banner {
+    margin: 0 20px 8px; border-radius: 8px; background: var(--bg-card);
+    border: 1px solid var(--line); padding: 8px 14px; font-size: 12.5px; color: var(--text-2);
+    display: none; align-items: center; gap: 10px; max-width: 880px;
+  }
+  .banner.show { display: flex; }
+  .banner .linklike { flex-shrink: 0; }
+  .banner .bar { flex: 1; height: 4px; border-radius: 99px; background: var(--bg-input); overflow: hidden; min-width: 80px; }
+  .banner .bar .fill { height: 100%; width: 40%; background: var(--text-2); border-radius: 99px; animation: indet 1.2s ease-in-out infinite alternate; }
+  @keyframes indet { from { margin-left: 0; width: 30%; } to { margin-left: 60%; width: 35%; } }
+
+  .search-zone { padding: 0 20px; }
+  .search-row { max-width: 860px; margin: 0 auto; display: flex; gap: 8px; }
+  .search-box { flex: 1; height: 34px; display: flex; align-items: center; gap: 8px; background: var(--bg-input); border-radius: 10px; padding: 0 12px; color: var(--text-3); }
+  .search-box:focus-within { outline: 1px solid var(--blue); }
+  .search-box.disabled { opacity: .45; }
+  .search-box input { flex: 1; border: none; background: none; outline: none; color: var(--text); font: inherit; }
+  .search-box input::placeholder { color: var(--text-3); }
+  .cta { height: 34px; padding: 0 18px; border-radius: 10px; background: var(--text); color: #16171a; font-weight: 600; font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
+  .cta:hover { background: #fff; }
+  .cta:disabled { opacity: .45; cursor: not-allowed; }
+  .cta .ring { width: 13px; height: 13px; border-radius: 99px; border: 2px solid #16171a; border-top-color: transparent; border-right-color: transparent; animation: spin 1s linear infinite; display: none; }
+  .cta.busy .ring { display: block; }
+  .cta.busy .svg-i { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .filter-row { max-width: 860px; margin: 8px auto 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .fchip { height: 22px; padding: 0 10px; border-radius: 99px; font-size: 11px; background: var(--bg-card); color: var(--text-2); border: 1px solid transparent; }
+  .fchip:hover { color: var(--text); }
+  .fchip.on { color: var(--text); border-color: var(--line); background: var(--bg-input); font-weight: 600; }
+  .filter-row .sep { width: 1px; height: 12px; background: var(--line); margin: 0 4px; }
+  .filter-row .mini { font-size: 11px; color: var(--text-3); display: flex; align-items: center; gap: 4px; }
+  .filter-row .mini input { accent-color: var(--text-2); }
+  .filter-row .mini input[type=range] { width: 68px; }
+  .filter-row .mini .mv { font-family: var(--mono); width: 34px; }
+
+  .results-wrap { flex: 1; overflow-y: auto; padding: 12px 20px 24px; }
+  .results { max-width: 860px; margin: 0 auto; }
+  .res-meta { font-size: 11px; color: var(--text-3); font-family: var(--mono); padding: 2px 2px 10px; display: flex; gap: 14px; flex-wrap: wrap; }
+
+  .res { border-radius: 8px; background: var(--bg-card); padding: 8px 12px; margin-bottom: 6px; cursor: pointer; }
+  .res:hover { background: var(--bg-hover); }
+  .res .r1 { display: flex; align-items: center; gap: 8px; }
+  .t-badge { font-size: 11px; padding: 1px 8px; border-radius: 99px; flex-shrink: 0; color: var(--text-2); border: 1px solid var(--line); font-weight: 500; }
+  .res .fname { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .res .grow { flex: 1; }
+  .res .score { font-family: var(--mono); font-size: 11px; color: var(--text-2); flex-shrink: 0; }
+  .res .chunkpos { font-family: var(--mono); font-size: 11px; color: var(--text-3); flex-shrink: 0; }
+  .res .r2 { font-size: 11px; color: var(--text-3); font-family: var(--mono); padding: 2px 0 4px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .res .r2 .mods { color: var(--blue); }
+  .res .r2 .more { color: var(--text-3); }
+  .res .r3 { font-size: 12.5px; color: var(--text-2); line-height: 1.65; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .res .r3 mark { background: #3d3f46; color: var(--text); border-radius: 2px; padding: 0 2px; }
+  .res .r3 .dim { color: var(--text-3); }
+
+  /* 加载骨架屏 */
+  .skel { border-radius: 8px; background: var(--bg-card); padding: 10px 12px; margin-bottom: 6px; }
+  .skel .l1, .skel .l2, .skel .l3 { border-radius: 4px; background: linear-gradient(100deg, var(--bg-input) 40%, #3b3d43 50%, var(--bg-input) 60%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+  .skel .l1 { height: 14px; width: 55%; margin-bottom: 8px; }
+  .skel .l2 { height: 10px; width: 40%; margin-bottom: 6px; }
+  .skel .l3 { height: 10px; width: 90%; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+
+  .empty { max-width: 860px; margin: 40px auto 0; text-align: center; }
+  .empty .box { border: 1px dashed var(--line); border-radius: 10px; padding: 28px 24px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .empty .tile { width: 36px; height: 36px; border-radius: 9px; background: var(--bg-card); display: flex; align-items: center; justify-content: center; color: var(--text-3); }
+  .empty .t1 { font-size: 13px; }
+  .empty .t2 { font-size: 11px; color: var(--text-3); }
+  .linklike { color: var(--blue); cursor: pointer; }
+  .linklike:hover { text-decoration: underline; }
+
+  /* ============ 弹窗 ============ */
+  .modal-mask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 50; align-items: center; justify-content: center; }
+  .modal-mask.open { display: flex; }
+  .modal { width: min(440px, 92vw); border-radius: 14px; background: var(--bg-card); border: 1px solid var(--line); padding: 20px; }
+  .modal h3 { font-size: 14px; font-weight: 600; }
+  .modal .sub { font-size: 12px; color: var(--text-3); margin: 2px 0 14px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: var(--text-2); margin-bottom: 5px; }
+  .field .fin, .field select.fin { width: 100%; height: 32px; padding: 0 10px; font: inherit; background: var(--bg-input); border: none; border-radius: 8px; color: var(--text); }
+  .field .fin:focus { outline: 1px solid var(--blue); }
+  .field .note { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  .btn-sec { height: 30px; padding: 0 14px; border-radius: 8px; background: var(--bg-input); color: var(--text-2); font-size: 12.5px; }
+  .btn-sec:hover { color: var(--text); }
+  .btn-pri { height: 30px; padding: 0 16px; border-radius: 8px; background: var(--text); color: #16171a; font-size: 12.5px; font-weight: 600; }
+  .btn-pri:hover { background: #fff; }
+  .check-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); margin-bottom: 12px; }
+  .check-row input { accent-color: var(--text-2); }
+  .input-with-btn { display: flex; gap: 6px; }
+  .input-with-btn .fin { flex: 1; }
+  /* 设置分区标题 */
+  .set-section {
+    font-size: 11px; color: var(--label); letter-spacing: .05em;
+    border-top: 1px solid var(--line); padding-top: 12px; margin: 4px 0 10px;
+  }
+  .set-section:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+  /* 扩展名 chips */
+  .ext-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .ext {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--bg-input); border-radius: 99px; padding: 2px 6px 2px 10px;
+    font-size: 11.5px; font-family: var(--mono); color: var(--text-2);
+  }
+  .ext-x { color: var(--text-3); font-size: 12px; line-height: 1; padding: 0 2px; }
+  .ext-x:hover { color: var(--red); }
+  .ext-add { font-size: 11.5px; color: var(--text-3); border: 1px dashed var(--line); border-radius: 99px; padding: 2px 10px; }
+  .ext-add:hover { color: var(--text); border-color: var(--text-3); }
+  .svc-info { font-size: 11.5px; color: var(--text-3); line-height: 1.6; }
+  .svc-info .mono { font-family: var(--mono); color: var(--text-2); }
+
+  /* ============ 抽屉 ============ */
+  #drawer-mask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 40; }
+  #drawer-mask.open { display: block; }
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 92vw); z-index: 41; background: var(--bg-card); border-left: 1px solid var(--line); transform: translateX(103%); transition: transform .18s cubic-bezier(.2,.9,.3,1); display: flex; flex-direction: column; }
+  #drawer.open { transform: translateX(0); }
+  .dr-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; }
+  .dr-head .back { display: none; }
+  .dr-head.hist .back { display: inline-flex; }
+  .dr-head .path { flex: 1; font-family: var(--mono); font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dr-meta { padding: 0 20px; }
+  .dr-meta .row1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .dr-meta h2 { font-size: 14px; font-weight: 600; }
+  .dr-meta .kv { display: flex; gap: 12px; flex-wrap: wrap; padding-top: 6px; font-size: 11px; font-family: var(--mono); color: var(--text-3); }
+  .dr-meta .kv .mods { color: var(--blue); }
+  /* 抽屉大纲（超长文档导航） */
+  .dr-toc { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 20px 0; }
+  .dr-toc a { font-size: 11px; color: var(--text-3); background: var(--bg-input); padding: 1px 8px; border-radius: 99px; cursor: pointer; }
+  .dr-toc a:hover { color: var(--text); }
+  .dr-body { flex: 1; overflow-y: auto; padding: 10px 20px 32px; }
+  .md { font-size: 13px; line-height: 1.7; }
+  .md h1 { font-size: 14px; margin: 18px 0 8px; font-weight: 600; }
+  .md h2 { font-size: 13px; margin: 14px 0 6px; font-weight: 600; color: var(--text-2); scroll-margin-top: 8px; }
+  .md p { margin: 6px 0; color: var(--text-2); }
+  .md ul { margin: 6px 0 6px 20px; color: var(--text-2); }
+  .md li { margin: 2px 0; }
+  .md code { font-family: var(--mono); font-size: 11px; background: var(--bg-input); padding: 1px 5px; border-radius: 4px; }
+  .md pre { background: var(--bg-side); border-radius: 9px; padding: 12px 14px; margin: 8px 0; overflow-x: auto; }
+  .md pre code { background: none; padding: 0; font-size: 11px; line-height: 1.6; color: var(--text-2); }
+  .md table { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 12px; }
+  .md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+  .md th { color: var(--text-3); font-weight: 600; }
+  .md a { color: var(--blue); cursor: pointer; }
+  .md a:hover { text-decoration: underline; }
+  .md blockquote { border-left: 2px solid var(--line); padding-left: 10px; color: var(--text-3); margin: 8px 0; }
+  .hit-block { background: var(--bg-input); border-left: 2px solid var(--text); border-radius: 0 6px 6px 0; padding: 8px 10px; margin: 10px -10px 10px -12px; position: relative; scroll-margin-top: 40px; }
+  .hit-block::before { content: "命中位置"; position: absolute; top: -8px; left: 12px; font-size: 10px; color: var(--text-3); background: var(--bg-card); padding: 0 6px; border-radius: 99px; }
+
+  #toasts { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 60; align-items: center; }
+  .toast { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 8px; font-size: 12.5px; background: var(--bg-card); border: 1px solid var(--line); color: var(--text-2); animation: t-in .14s ease; }
+  .toast.out { animation: t-out .16s ease forwards; }
+  .toast .ok-ic { color: var(--green); }
+  @keyframes t-in { from { opacity: 0; transform: translateY(6px); } }
+  @keyframes t-out { to { opacity: 0; transform: translateY(4px); } }
+
+  /* ============ 场景切换器（仅演示用） ============ */
+  #scenario-bar {
+    position: fixed; right: 12px; bottom: 12px; z-index: 70;
+    display: flex; align-items: center; gap: 6px;
+    background: var(--bg-card); border: 1px solid var(--line); border-radius: 99px; padding: 4px 6px 4px 12px;
+    font-size: 11px; color: var(--text-3); font-family: var(--mono);
+  }
+  #scenario-bar select {
+    background: var(--bg-input); color: var(--text); border: none; border-radius: 99px;
+    font-size: 11px; padding: 3px 8px; outline: none; cursor: pointer; font-family: inherit;
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <aside>
+    <div class="brand">
+      <div class="mark">V</div>
+      <div class="name">vector-hub <em>控制台</em></div>
+    </div>
+    <div class="side-scroll">
+      <div class="group-label">
+        <span>项目</span><span class="sel" id="sel-count"></span>
+        <span class="grow"></span>
+        <button class="op" onclick="selectAll(true)">全选</button>
+        <button class="op" onclick="selectAll(false)">清空</button>
+      </div>
+      <div class="proj-filter" id="proj-filter" style="display:none">
+        <span class="svg-i" data-i="search" data-s="12"></span>
+        <input id="proj-q" placeholder="过滤项目…">
+      </div>
+      <div id="proj-list"></div>
+      <div id="import-zone"></div>
+    </div>
+    <div class="side-foot">
+      <span class="dot" id="foot-dot"></span>
+      <span class="st" id="foot-st">索引正常</span>
+      <button class="icon-btn" title="Embedding 设置" onclick="openModal('settings-modal')">
+        <span class="svg-i" data-i="settings" data-s="15"></span>
+      </button>
+    </div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <h1>语义检索</h1>
+      <span class="sub" id="model-sub">embo-01 · MiniMax</span>
+      <div class="grow"></div>
+    </div>
+
+    <!-- 全局提示条：未配置 / 重建中 -->
+    <div class="banner" id="banner">
+      <span id="banner-text"></span>
+      <div class="bar" id="banner-bar" style="display:none"><div class="fill"></div></div>
+      <span class="linklike" id="banner-link" style="display:none" onclick="openModal('settings-modal')">去设置</span>
+    </div>
+
+    <div class="search-zone">
+      <div class="search-row">
+        <div class="search-box" id="sbox">
+          <span class="svg-i" data-i="search" data-s="15"></span>
+          <input id="q" placeholder="输入自然语言问题，回车搜索…" value="当前系统是怎么获取消耗的tokens数量的">
+        </div>
+        <button class="cta" id="search-btn" onclick="runSearch()">
+          <span class="ring"></span><span class="svg-i" data-i="search" data-s="13"></span>搜索
+        </button>
+      </div>
+      <div class="filter-row" id="type-chips">
+        <button class="fchip on" data-t="">全部</button>
+        <button class="fchip" data-t="goal">目标</button>
+        <button class="fchip" data-t="architecture">架构</button>
+        <button class="fchip" data-t="change">变更</button>
+        <button class="fchip" data-t="module">模块</button>
+        <button class="fchip" data-t="index">索引</button>
+        <span class="sep"></span>
+        <label class="mini" title="语义 + BM25 关键词双通道检索，技术文档建议开启"><input type="checkbox" checked> 混合搜索</label>
+        <label class="mini" title="相似度低于该值的结果被过滤；短文档场景可能需要调到负值">阈值 <input type="range" min="-1" max="1" step="0.05" value="-0.3"><span class="mv">-0.30</span></label>
+        <label class="mini">TopK <input type="number" value="10" min="1" max="50" style="width:42px;background:var(--bg-input);border:none;border-radius:6px;color:var(--text);font-size:11px"></label>
+      </div>
+    </div>
+
+    <div class="results-wrap">
+      <div class="results" id="results"></div>
+    </div>
+  </main>
+</div>
+
+<!-- 设置弹窗 -->
+<div class="modal-mask" id="settings-modal">
+  <div class="modal" style="width:min(480px,92vw);max-height:calc(100vh - 80px);overflow-y:auto">
+    <h3>设置</h3>
+    <div class="sub">Embedding 模型与数据存储</div>
+
+    <div class="set-section">Embedding</div>
+    <div class="field">
+      <label>提供商</label>
+      <select class="fin" id="set-provider">
+        <option>MiniMax（embo-01 · 支持 Coding Plan 订阅 key）</option>
+        <option>OpenAI 兼容（自定义 endpoint）</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>API Key</label>
+      <input class="fin" type="password" value="••••••••XaXU">
+      <div class="note">已保存的 key 只显示尾 4 位，留原值提交表示不修改</div>
+    </div>
+    <div class="field">
+      <label>模型名</label>
+      <input class="fin" type="text" placeholder="默认 embo-01">
+    </div>
+    <div class="field" id="endpoint-field" style="display:none">
+      <label>Endpoint（不含 /v1）</label>
+      <input class="fin" type="text" placeholder="https://api.siliconflow.cn">
+    </div>
+
+    <div class="set-section">数据与同步</div>
+    <div class="field">
+      <label>数据目录（向量库保存位置）</label>
+      <div class="input-with-btn">
+        <input class="fin" type="text" id="set-root" value="D:\SanQian.Xu\vector-hub\data" readonly>
+        <button class="btn-sec" onclick="toast('正式版：弹出系统文件夹选择器')">更改…</button>
+      </div>
+      <div class="note">切换目录后已有索引不会自动迁移；项目注册保留，重新同步即可恢复（源文件夹始终是权威数据）。</div>
+    </div>
+    <div class="field">
+      <label>同步文件类型</label>
+      <div class="ext-chips" id="ext-chips">
+        <span class="ext">.md<button class="ext-x" onclick="this.parentNode.remove()">×</button></span>
+        <span class="ext">.txt<button class="ext-x" onclick="this.parentNode.remove()">×</button></span>
+        <span class="ext">.html<button class="ext-x" onclick="this.parentNode.remove()">×</button></span>
+        <button class="ext-add" onclick="addExt()">+ 添加</button>
+      </div>
+      <div class="note">文件夹同步和持续监听只处理这些扩展名。</div>
+    </div>
+    <div class="field">
+      <label>监听防抖（毫秒）</label>
+      <input class="fin" type="number" value="500" min="100" step="100" style="width:110px">
+      <div class="note">文件保存后等待该时长再同步，避免编辑器多次写盘触发重复索引。</div>
+    </div>
+
+    <div class="set-section">服务</div>
+    <div class="svc-info">运行于 <span class="mono">http://localhost:8787</span> · 由启动参数 <span class="mono">--port</span> 指定，修改后需重启</div>
+
+    <div class="modal-actions">
+      <button class="btn-sec" onclick="closeModal('settings-modal')">取消</button>
+      <button class="btn-pri" onclick="closeModal('settings-modal');toast('设置已保存（演示）')">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 导入弹窗 -->
+<div class="modal-mask" id="import-modal">
+  <div class="modal">
+    <h3>导入本地文件夹</h3>
+    <div class="sub">支持 md / txt / html；原文档不修改，索引随时可重建</div>
+    <div class="field">
+      <label>源文件夹</label>
+      <div class="input-with-btn">
+        <input class="fin" type="text" placeholder="D:\knowledge\…">
+        <button class="btn-sec" onclick="toast('正式版：弹出系统文件夹选择器')">浏览…</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>项目名</label>
+      <input class="fin" type="text" placeholder="默认取文件夹名">
+    </div>
+    <div class="check-row">
+      <input type="checkbox" id="imp-watch" checked>
+      <label for="imp-watch" style="margin:0">持续同步（文件夹变化自动更新索引）</label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-sec" onclick="closeModal('import-modal')">取消</button>
+      <button class="btn-pri" onclick="closeModal('import-modal');toast('已导入 2 个文件（演示）')">导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 抽屉 -->
+<div id="drawer-mask" onclick="closeDrawer()"></div>
+<div id="drawer">
+  <div class="dr-head" id="dr-head">
+    <button class="icon-btn back" onclick="goBack()"><span class="svg-i" data-i="back" data-s="15"></span></button>
+    <span class="path" id="dr-path"></span>
+    <button class="icon-btn" onclick="closeDrawer()"><span class="svg-i" data-i="x" data-s="14"></span></button>
+  </div>
+  <div class="dr-meta">
+    <div class="row1"><span class="t-badge" id="dr-type"></span><h2 id="dr-title"></h2></div>
+    <div class="kv" id="dr-kv"></div>
+  </div>
+  <div class="dr-toc" id="dr-toc"></div>
+  <div class="dr-body"><div class="md" id="dr-body"></div></div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+
+<!-- 场景切换器（演示工具，正式版不存在） -->
+<div id="scenario-bar">
+  <span style="padding-right:2px">演示场景</span><span style="color:var(--text-3);opacity:.7;font-size:10px">（预览专用，正式版无）</span>
+  <select id="scenario" onchange="applyScenario(this.value)">
+    <option value="normal">正常</option>
+    <option value="many">120 个项目</option>
+    <option value="empty">空知识库</option>
+    <option value="unconfigured">未配置模型</option>
+    <option value="rebuilding">重建中</option>
+  </select>
+</div>
+
+<script>
+const ICONS = {
+  'search': '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.8-3.8"/>',
+  'settings': '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  'folder-plus': '<path d="M4 20h16a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 4.9A2 2 0 0 0 7.93 4H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2z"/><path d="M12 10v6M9 13h6"/>',
+  'check': '<path d="m4.5 12.5 5 5L19.5 7"/>',
+  'x': '<path d="M18 6 6 18M6 6l12 12"/>',
+  'back': '<path d="m14.5 5.5-7 6.5 7 6.5"/>',
+  'doc': '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+};
+function iconSvg(name, size) { return `<svg class="svg-i" width="${size}" height="${size}" viewBox="0 0 24 24">${ICONS[name] || ''}</svg>`; }
+document.querySelectorAll('[data-i]').forEach(el => { el.outerHTML = iconSvg(el.dataset.i, el.dataset.s || 14); });
+
+const TYPE_LABEL = { goal: '目标', architecture: '架构', change: '变更', module: '模块', 'change-index': '索引', 'module-index': '索引', readme: '说明' };
+const $ = (id) => document.getElementById(id);
+
+/* ============ 状态与场景 ============ */
+const BASE_PROJECTS = [
+  { name: 'token-consumption-leaderboard', docs: 15, watch: true, on: true },
+  { name: 'tech-notes', docs: 4, watch: false, on: true },
+  { name: 'dev-sessions', docs: 3, watch: false, on: true },
+  { name: 'team-wiki', docs: 3, watch: false, on: false },
+];
+let projects = BASE_PROJECTS;
+let projQuery = '';
+let typeFilter = '';
+let busy = false;
+
+const RESULTS = [
+  { docType: 'goal', file: 'GOAL.md', score: '3.201', chunk: '1/3',
+    meta: [['状态', 'living'], ['tags', 'goal, product, metrics, review, usage, cost', 5]],
+    snippet: '…经 <mark>ccusage</mark> 汇总后，提供四种视图（日 / 月 / 全部 / 自定义区间）以帮助用户观察 <mark>token</mark> 与费用。主要用户：使用 Claude Code（或兼容 JSONL 输出的其他 AI CLI）的开发者…' },
+  { docType: 'module', file: 'live-counter.md', score: '2.549', chunk: '2/4',
+    meta: [['模块', 'live-counter'], ['tags', 'sse, realtime, jsonl, watch, snapshot', 4]],
+    snippet: '实时 <mark>token</mark> 计数器：SSE + JSONL 监听双通道。服务端 <mark>watch</mark> Claude Code 的会话文件变更，增量解析 usage 字段后经 /api/live/stream 推送给前端…' },
+  { docType: 'architecture', file: 'ARCHITECTURE.md', score: '2.145', chunk: '1/6',
+    meta: [['tags', 'architecture, data-flow']],
+    snippet: '数据流：CLI 采集 → ccusage 派生静态数据 → server 聚合 → 浏览器渲染。实时通道：自定义 CLAUDE_CONFIG_DIR 路径下的 <mark>JSONL 监听</mark>（server/live.ts）→ SSE 推送…' },
+  { docType: 'change', file: '2026-06-27_32ca2a1_live-counter.md', score: '1.790', chunk: '3/9',
+    meta: [['日期', '2026-06-27'], ['提交', '32ca2a1'], ['模块', 'live-counter, frontend-shell, docs, product', 4]],
+    snippet: '新增 SSE 端点 /api/live/stream，前端 useLiveTokens 消费 LiveSnapshot 强类型 payload；解决了 session resume 时 message.id 重复 append 导致的 <mark>token</mark> 重复计数…' },
+  { docType: 'change', file: '2026-06-23_236bd97_rename-cli-to-tokboard.md', score: '0.920', chunk: '2/6',
+    meta: [['日期', '2026-06-23'], ['提交', '236bd97'], ['模块', 'cli-binary, product-branding']],
+    snippet: 'localStorage 键从 tokenmeter.coach-settings 迁移为 tokboard.coach-settings；旧键遗留不影响新版本…<span class="dim">（产品名误伤示例）</span>' },
+  { docType: 'module', file: 'calendar.md', score: '0.710', chunk: '1/5',
+    meta: [['模块', 'calendar'], ['tags', 'ui, calendar, swipe, gesture, month-grid, theme', 6]],
+    snippet: '日历视图：月度网格 + 每日用量色阶；新增 swipe 手势切换月份，移动端与桌面共用手势逻辑…' },
+];
+
+const DOCS = {
+  'ARCHITECTURE.md': { type: 'architecture', title: 'ARCHITECTURE — 架构总览',
+    kv: [['更新', '2026-07-07']],
+    toc: ['数据流', '模块划分', '实时通道实现要点', '部署拓扑', '性能预算', '关联变更'],
+    body: `
+<h1>token-consumption-leaderboard · Architecture</h1>
+<blockquote>本文件描述系统的模块划分与数据流。配套模块文档见 modules/。（演示超长文档：用下方大纲锚点跳转）</blockquote>
+<h2>数据流</h2>
+<div class="hit-block"><p>CLI 采集 → ccusage 派生静态数据 → server 聚合 → 浏览器渲染。实时通道：<b>自定义 <code>CLAUDE_CONFIG_DIR</code> 路径下的 JSONL 监听</b>（<code>server/live.ts</code>）→ SSE 推送 → <code>useLiveTokens</code> 消费。</p></div>
+<h2>模块划分</h2>
+<table><tr><th>模块</th><th>Source Paths</th><th>职责</th></tr>
+<tr><td><a data-doc="live-counter.md">live-counter</a></td><td><code>server/live.ts</code></td><td>实时计数：JSONL 监听 + SSE</td></tr>
+<tr><td><a data-doc="calendar.md">calendar</a></td><td><code>apps/web/src/calendar/*</code></td><td>日历视图与手势</td></tr></table>
+<h2>实时通道实现要点</h2>
+<pre><code>watch(configDir, (file) =&gt; {
+  if (file.endsWith('.jsonl')) queueParse(file);
+});</code></pre>
+<h2>部署拓扑</h2><p>单机本地服务：127.0.0.1:5757，静态资源与 API 同源；无外部数据库依赖。</p>
+<h2>性能预算</h2><p>首屏 &lt; 300ms；日历切换 &lt; 16ms/帧；SSE 心跳 15s。</p>
+<h2>关联变更</h2>
+<ul><li><a data-doc="2026-06-27_32ca2a1_live-counter.md">2026-06-27 · live-counter 实时计数器</a></li>
+<li><a data-doc="GOAL.md">返回目标文档</a></li></ul>` },
+  'GOAL.md': { type: 'goal', title: 'GOAL — 目标文档',
+    kv: [['状态', 'living'], ['更新', '2026-07-08']],
+    toc: ['主要用户与场景', '非目标', '关联'],
+    body: `
+<h1>token-consumption-leaderboard · Goal</h1>
+<div class="hit-block"><p>为使用 Claude Code（或兼容 JSONL 输出的其他 AI CLI）的开发者，提供 token 用量、费用、节奏与模型分布的定期回顾视图。<b>数据经 ccusage 汇总</b>。</p></div>
+<h2>主要用户与场景</h2><ul><li>主要用户：AI CLI 重度使用者</li><li>使用场景：周报回顾、费用控制、模型切换决策</li></ul>
+<h2>非目标</h2><ul><li>不做团队协作 / 多账户聚合</li></ul>
+<h2>关联</h2><ul><li><a data-doc="ARCHITECTURE.md">ARCHITECTURE — 架构总览</a></li></ul>` },
+  'live-counter.md': { type: 'module', title: 'module: live-counter',
+    kv: [['模块', 'live-counter'], ['更新', '2026-06-27']],
+    toc: ['要点', '关联变更'],
+    body: `
+<h1>live-counter · 实时 token 计数器</h1>
+<div class="hit-block"><p><b>SSE + JSONL 监听双通道</b>：服务端 watch 会话文件变更，增量解析 usage 字段，经 <code>/api/live/stream</code> 推送。</p></div>
+<h2>要点</h2><ul><li>监听 <code>~/.claude/projects/**/*.jsonl</code></li><li>按 <code>message.id</code> 幂等去重</li></ul>
+<h2>关联变更</h2><ul><li><a data-doc="2026-06-27_32ca2a1_live-counter.md">2026-06-27 · 实时 token 计数器</a></li></ul>` },
+  '2026-06-27_32ca2a1_live-counter.md': { type: 'change', title: 'change: 实时 token 计数器',
+    kv: [['提交', '32ca2a1…'], ['日期', '2026-06-27'], ['模块', 'live-counter, frontend-shell']],
+    toc: ['行为变更与兼容性', '关联变更'],
+    body: `
+<h1>实时 token 计数器并修复 message.id 去重</h1>
+<div class="hit-block"><p>新增 SSE 端点 <code>/api/live/stream</code>；修复 session resume 时重复 append 导致的重复计数。</p></div>
+<h2>行为变更与兼容性</h2><ul><li>共 13 个文件，+978 / −10 行</li></ul>
+<h2>关联变更</h2><ul><li><a data-doc="live-counter.md">模块文档：live-counter</a></li></ul>` },
+  'calendar.md': { type: 'module', title: 'module: calendar',
+    kv: [['模块', 'calendar'], ['更新', '2026-07-07']],
+    toc: ['关联变更'],
+    body: `
+<h1>calendar · 日历视图</h1>
+<div class="hit-block"><p>月度网格 + 每日用量色阶；新增 swipe 手势切换月份。</p></div>
+<h2>关联变更</h2><ul><li><a data-doc="2026-06-27_32ca2a1_live-counter.md">2026-06-27 · live-counter</a></li></ul>` },
+  '2026-06-23_236bd97_rename-cli-to-tokboard.md': { type: 'change', title: 'change: CLI 更名为 tokboard',
+    kv: [['提交', '236bd97…'], ['日期', '2026-06-23'], ['模块', 'cli-binary, product-branding']],
+    toc: ['迁移指引'],
+    body: `
+<h1>CLI 从 token-leaderboard 更名为 tokboard</h1>
+<div class="hit-block"><p>localStorage 键从 <code>tokenmeter.coach-settings</code> 迁移为 <code>tokboard.coach-settings</code>。</p></div>
+<h2>迁移指引</h2><pre><code>npm install -g token-leaderboard@2.2.1</code></pre>` },
+};
+
+/* ============ 场景 ============ */
+function applyScenario(name) {
+  const banner = $('banner');
+  banner.classList.remove('show');
+  $('banner-bar').style.display = 'none';
+  $('banner-link').style.display = 'none';
+  $('sbox').classList.remove('disabled');
+  $('q').disabled = false;
+  $('search-btn').disabled = false;
+  $('model-sub').textContent = 'embo-01 · MiniMax';
+
+  if (name == 'many') {
+    projects = [
+      { name: 'token-consumption-leaderboard', docs: 15, watch: true, on: true },
+      ...Array.from({ length: 119 }, (_, i) => ({
+        name: (['knowledge', 'workbench', 'notes', 'sandbox', 'agent'][i % 5]) + '-' + String(i + 1).padStart(3, '0'),
+        docs: 2 + (i * 7) % 400,
+        watch: i % 9 == 0,
+        on: false,
+      })),
+    ];
+  } else if (name == 'empty') {
+    projects = [];
+  } else if (name == 'unconfigured') {
+    projects = [];
+    $('model-sub').textContent = '未配置';
+    $('sbox').classList.add('disabled');
+    $('q').disabled = true;
+    $('search-btn').disabled = true;
+    $('banner-text').textContent = '尚未配置 Embedding 模型，搜索不可用。';
+    banner.classList.add('show');
+    $('banner-link').style.display = '';
+    $('foot-dot').className = 'dot warn';
+    $('foot-st').textContent = '未配置模型';
+  } else if (name == 'rebuilding') {
+    projects = BASE_PROJECTS;
+    $('banner-text').textContent = '正在按新模型重建索引：tech-notes（2/4）…';
+    banner.classList.add('show');
+    $('banner-bar').style.display = '';
+    $('foot-dot').className = 'dot warn';
+    $('foot-st').textContent = '重建索引中 2/4';
+  } else {
+    projects = BASE_PROJECTS;
+    $('foot-dot').className = 'dot';
+    $('foot-st').textContent = '索引正常';
+  }
+  if (name != 'unconfigured' && name != 'rebuilding') {
+    $('foot-dot').className = 'dot';
+    $('foot-st').textContent = '索引正常';
+  }
+  $('proj-q').value = '';
+  projQuery = '';
+  renderProjects();
+  renderResults();
+}
+
+/* ============ 渲染 ============ */
+function fmtCount(n) { return n >= 10000 ? (n / 1000).toFixed(1) + 'k' : n; }
+
+function renderProjects() {
+  // 项目过滤框：>15 个项目时出现
+  $('proj-filter').style.display = projects.length > 15 ? '' : 'none';
+  const list = projects.filter(p => !projQuery || p.name.toLowerCase().includes(projQuery.toLowerCase()));
+  const el = $('proj-list');
+  el.innerHTML = '';
+  $('import-zone').innerHTML =
+    `<button class="import-row" onclick="openModal('import-modal')">
+      <span class="svg-i" data-i2="folder-plus"></span>导入本地文件夹</button>`;
+
+  if (projects.length == 0) {
+    // 侧栏空态
+    el.innerHTML = `<div class="side-empty">
+      <div class="tile">${iconSvg('doc', 16)}</div>
+      <div class="t1">还没有项目</div>
+      <div class="t2">导入一个知识库文件夹开始<br><span class="linklike" onclick="openModal('import-modal')">导入本地文件夹</span></div>
+    </div>`;
+    // 空态下导入行隐藏（空态卡片里已有入口），避免重复
+    $('import-zone').innerHTML = '';
+    $('sel-count').textContent = '0/0';
+    return;
+  }
+
+  for (const p of list) {
+    const row = document.createElement('div');
+    row.className = 'proj' + (p.on ? ' on' : '');
+    const watch = p.watch
+      ? `<span class="watch-ic" title="持续同步中"><svg class="svg-i" width="12" height="12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span>` : '';
+    row.innerHTML =
+      `<span class="cb">${iconSvg('check', 10)}</span>` +
+      `<span class="pn" title="${p.name}">${p.name}</span>` + watch +
+      `<span class="cnt">${fmtCount(p.docs)}</span>` +
+      `<button class="del" title="删除索引（不动源文件）">${iconSvg('x', 12)}</button>`;
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.del')) {
+        if (confirm(`删除项目 "${p.name}" 的索引？源文件夹不受影响。`)) toast('已删除项目索引（演示）');
+        return;
+      }
+      p.on = !p.on; renderProjects();
+    });
+    el.appendChild(row);
+  }
+  // 过滤无命中
+  if (list.length == 0) {
+    el.innerHTML = `<div class="side-empty"><div class="t2">没有匹配 “${projQuery}” 的项目</div></div>`;
+  }
+  // 图标二次注入（import-row）
+  document.querySelectorAll('[data-i2]').forEach(n => { n.outerHTML = iconSvg(n.dataset.i2, 14).replace('class="svg-i"', 'class="svg-i"'); });
+  $('sel-count').textContent = `${projects.filter(p => p.on).length}/${projects.length}`;
+}
+$('proj-q').addEventListener('input', (e) => { projQuery = e.target.value.trim(); renderProjects(); });
+function selectAll(on) { projects.forEach(p => p.on = on); renderProjects(); }
+
+function metaHtml(meta) {
+  return meta.map(([k, v]) => {
+    if (k == 'tags' || k == '模块') {
+      const parts = v.split(', ');
+      const shown = parts.slice(0, 2).join(', ');
+      const rest = parts.length - 2;
+      const cls = k == '模块' ? 'mods' : '';
+      return `<span class="${cls}">${shown}${rest > 0 ? ` <span class="more">+${rest}</span>` : ''}</span>`;
+    }
+    return `<span>${v}</span>`;
+  }).join('');
+}
+
+function renderResults() {
+  const list = RESULTS.filter(r => !typeFilter || r.docType == typeFilter);
+  const el = $('results');
+  if (projects.length == 0) {
+    el.innerHTML = `<div class="empty"><div class="box">
+      <div class="tile">${iconSvg('doc', 18)}</div>
+      <div class="t1">知识库还是空的</div>
+      <div class="t2"><span class="linklike" onclick="openModal('import-modal')">导入本地文件夹</span>，或通过 API 写入第一批文档</div>
+    </div></div>`;
+    return;
+  }
+  if (list.length == 0) {
+    el.innerHTML = `<div class="empty"><div class="box">
+      <div class="tile">${iconSvg('doc', 18)}</div>
+      <div class="t1">没有命中结果</div>
+      <div class="t2">试着切换类型过滤、降低阈值，或 <span class="linklike" onclick="document.getElementById('q').value='';runSearch()">清空关键词</span></div>
+    </div></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="res-meta"><span>${list.length} 条结果 · 412ms · ${projects.filter(p => p.on).length} 项目</span><span>GET /api/search?q=…&isBm25=true&docTypes=${typeFilter || 'all'}</span></div>`;
+  for (const r of list) {
+    const row = document.createElement('div');
+    row.className = 'res';
+    row.innerHTML =
+      `<div class="r1">
+        <span class="t-badge">${TYPE_LABEL[r.docType]}</span>
+        <span class="fname" title="${r.file}">${r.file}</span>
+        <span class="grow"></span>
+        <span class="score">${r.score}</span>
+        <span class="chunkpos">第${r.chunk.split('/')[0]}/${r.chunk.split('/')[1]}块</span>
+      </div>
+      <div class="r2">${metaHtml(r.meta)}</div>
+      <div class="r3">${r.snippet}</div>`;
+    row.addEventListener('click', () => openDoc(r.file));
+    el.appendChild(row);
+  }
+}
+
+document.querySelectorAll('#type-chips .fchip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('#type-chips .fchip').forEach(c => c.classList.remove('on'));
+    chip.classList.add('on'); typeFilter = chip.dataset.t; renderResults();
+  });
+});
+$('q').addEventListener('keydown', e => { if (e.key == 'Enter') runSearch(); });
+
+/* 搜索 = 真实加载态演示（骨架屏 → 800ms 后出结果） */
+function runSearch() {
+  if (busy || $('q').disabled) return;
+  busy = true;
+  $('search-btn').classList.add('busy');
+  $('results').innerHTML = Array.from({ length: 3 }, () =>
+    `<div class="skel"><div class="l1"></div><div class="l2"></div><div class="l3"></div></div>`).join('');
+  setTimeout(() => {
+    $('search-btn').classList.remove('busy');
+    busy = false;
+    renderResults();
+  }, 800);
+}
+
+$('set-provider').addEventListener('change', () => {
+  $('endpoint-field').style.display = $('set-provider').selectedIndex == 1 ? '' : 'none';
+});
+function addExt() {
+  const ext = prompt('输入扩展名（如 .pdf）');
+  if (!ext) return;
+  const chip = document.createElement('span');
+  chip.className = 'ext';
+  chip.innerHTML = `${ext.replace(/^\.?/, '.')}<button class="ext-x" onclick="this.parentNode.remove()">×</button>`;
+  document.querySelector('.ext-add').before(chip);
+}
+function openModal(id) { $(id).classList.add('open'); }
+function closeModal(id) { $(id).classList.remove('open'); }
+document.querySelectorAll('.modal-mask').forEach(m => m.addEventListener('click', e => { if (e.target == m) m.classList.remove('open'); }));
+
+/* ============ 抽屉 ============ */
+let docHistory = [];
+function openDoc(file, pushHist = true) {
+  const doc = DOCS[file];
+  if (!doc) { toast('演示数据中没有这篇文档的全文'); return; }
+  if (pushHist && $('drawer').classList.contains('open')) docHistory.push($('dr-path').dataset.file);
+  const sub = /^\d{4}-/.test(file) ? 'changes\\' : (file == 'ARCHITECTURE.md' || file == 'GOAL.md' ? '' : 'modules\\');
+  $('dr-path').textContent = `D:\\knowledge\\token-consumption-leaderboard\\${sub}${file}`;
+  $('dr-path').dataset.file = file;
+  $('dr-type').textContent = TYPE_LABEL[doc.type];
+  $('dr-title').textContent = doc.title;
+  $('dr-kv').innerHTML = doc.kv.map(([k, v]) => `<span>${k == '模块' ? `<span class="mods">${v}</span>` : v}</span>`).join('');
+  $('dr-body').innerHTML = doc.body;
+  $('dr-toc').innerHTML = (doc.toc || []).map(t => `<a onclick="jumpTo(this)">${t}</a>`).join('');
+  $('dr-head').classList.toggle('hist', docHistory.length > 0);
+  $('drawer-mask').classList.add('open');
+  $('drawer').classList.add('open');
+  $('dr-body').querySelectorAll('a[data-doc]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); openDoc(a.dataset.doc); });
+  });
+  const hit = $('dr-body').querySelector('.hit-block');
+  if (hit) setTimeout(() => hit.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120);
+}
+function jumpTo(a) {
+  const target = [...$('dr-body').querySelectorAll('h2')].find(h => h.textContent.startsWith(a.textContent));
+  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function goBack() { const prev = docHistory.pop(); if (prev) openDoc(prev, false); }
+function closeDrawer() {
+  $('drawer-mask').classList.remove('open');
+  $('drawer').classList.remove('open');
+  docHistory = [];
+}
+document.addEventListener('keydown', e => { if (e.key == 'Escape') { closeDrawer(); document.querySelectorAll('.modal-mask.open').forEach(m => m.classList.remove('open')); } });
+
+/* ============ toast ============ */
+function toast(msg) {
+  const host = $('toasts');
+  while (host.children.length >= 3) host.firstChild.remove();
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = `<span class="ok-ic">${iconSvg('check', 13)}</span><span>${msg}</span>`;
+  host.appendChild(t);
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 200); }, 3200);
+}
+document.querySelector('.mini input[type=range]').addEventListener('input', e => {
+  e.target.nextElementSibling.textContent = Number(e.target.value).toFixed(2);
+});
+
+applyScenario('normal');
+</script>
+</body>
+</html>

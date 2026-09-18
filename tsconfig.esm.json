@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ES2022",
+    "moduleResolution": "node",
+    "outDir": "./dist/esm"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["test/**/*", "scripts/**/*"]
+}
