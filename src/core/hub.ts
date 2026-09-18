@@ -167,11 +167,17 @@ export class VectorHub {
 
     /**
      * Deletes a document from a project index.
-     * @returns Whether the document was deleted.
+     * @returns Whether the document existed and was deleted.
      */
     public async deleteDocument(project: string, uri: string): Promise<boolean> {
         const index = this.getProjectIndex(project);
         if (!(await index.isIndexCreated().catch(() => false))) {
+            return false;
+        }
+        // Vectra's deleteDocument is a no-op for unknown uris; check first so
+        // callers can distinguish "deleted" from "was not there".
+        const documentId = await index.getDocumentId(uri).catch(() => undefined);
+        if (!documentId) {
             return false;
         }
         await index.deleteDocument(uri);
