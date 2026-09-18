@@ -26,10 +26,13 @@
     "sync": "tsx src/bin.ts sync",
     "watch": "tsx src/bin.ts watch",
     "seed": "tsx scripts/seed.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:vectra": "npm --prefix packages/vectra run build",
+    "build:all": "npm run build:vectra && npm run build",
+    "test:vectra": "npm --prefix packages/vectra run test:mocha"
   },
   "dependencies": {
-    "vectra": "file:../vectra"
+    "vectra": "file:packages/vectra"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

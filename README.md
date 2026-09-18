@@ -87,4 +87,4 @@ npm test      # 单元测试（无网络依赖）
 npm run build # 产 dist/cjs + dist/esm 双格式
 ```
 
-依赖说明：`vectra` 使用本地路径依赖（`file:../vectra`），因为 `MiniMaxEmbeddings` 适配器尚未发布到 npm；上游合并发布后可换成正式版本号。
+依赖说明：`vectra` 已作为内嵌后端吸收进本仓库（`packages/vectra`，squash 快照——**刻意不带上游历史**，因其中含一个泄漏的 OpenAI key；上游更新用 `git subtree pull -P packages/vectra https://github.com/Stevenic/vectra main --squash`）。`npm run build:all` 先构建 vectra 再构建 vector-hub；`npm run test:vectra` 跑 vectra 测试套件。
