@@ -38,6 +38,9 @@ export class VectorHub {
     private _embeddings: EmbeddingsModel | undefined;
     private readonly _storage: FileStorage;
     private readonly _indexes = new Map<string, LocalDocumentIndex>();
+    /** Projects whose BM25 build failed once (e.g. vectra's "Invalid string
+     * length" on large corpora) — skip straight to semantic for them. */
+    private readonly _bm25Broken = new Set<string>();
 
     public constructor(options: VectorHubOptions) {
         this._rootPath = path.resolve(options.rootPath);
@@ -224,23 +227,26 @@ export class VectorHub {
         }
 
         const settled = await Promise.allSettled(
-            candidates.map(({ name, index }) =>
-                index
+            candidates.map(({ name, index }) => {
+                const useBm25 = opts.isBm25 && !this._bm25Broken.has(name);
+                return index
                     .queryDocuments(query, {
                         maxDocuments: opts.maxDocuments,
                         maxChunks: opts.maxChunks,
-                        isBm25: opts.isBm25,
+                        isBm25: useBm25,
                         filter: opts.docTypes && opts.docTypes.length > 0
                             ? { docType: { $in: opts.docTypes } }
                             : undefined,
                     })
                     .catch(async (err: unknown) => {
-                        // BM25 needs a minimum corpus size ("collection is too
-                        // small for consolidation"). Tiny projects fail hybrid
-                        // queries — degrade that project to pure semantic
-                        // instead of dropping it from the results.
-                        const message = err instanceof Error ? err.message : String(err);
-                        if (opts.isBm25 && message.includes('too small')) {
+                        // BM25 failures fall back to pure semantic for that
+                        // project: tiny corpora hit "collection is too small
+                        // for consolidation", large ones can hit vectra's
+                        // "Invalid string length" while building the BM25
+                        // table. Remember the failure so later queries skip
+                        // the doomed build; either way the semantic path answers.
+                        if (useBm25) {
+                            this._bm25Broken.add(name);
                             return await index.queryDocuments(query, {
                                 maxDocuments: opts.maxDocuments,
                                 maxChunks: opts.maxChunks,
@@ -251,8 +257,8 @@ export class VectorHub {
                         }
                         throw err;
                     })
-                    .then((results) => ({ name, index, results })),
-            ),
+                    .then((results) => ({ name, index, results }));
+            }),
         );
 
         const errors: SearchResponse['errors'] = [];
