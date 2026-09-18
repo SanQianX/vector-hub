@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { VectorHub } from '../core/hub';
 import { createMiniMaxEmbeddings, createOpenAIEmbeddings } from '../core/embeddings';
-import type { EmbeddingsModel, FolderWatcher } from 'vectra';
+import { KbFolderWatcher } from '../core/kb-sync';
+import type { EmbeddingsModel } from 'vectra';
 
 /**
  * Embedding provider + data/sync settings persisted in the global config
@@ -81,7 +82,7 @@ export class HubManager {
     public readonly configPath: string;
 
     private _config: HubConfigFile = {};
-    private readonly _watchers = new Map<string, FolderWatcher>();
+    private readonly _watchers = new Map<string, KbFolderWatcher>();
     private readonly _embeddingsFactory: EmbeddingsFactory;
     private readonly _cliRootPath?: string;
     private _rebuild: RebuildStatus = { running: false, total: 0, done: 0, manual: [], errors: [] };

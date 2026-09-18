@@ -59,8 +59,6 @@ async function main(): Promise<void> {
             }
             const watcher = await hub.watchFolder(project, source);
             console.log(`Watching ${watcher.trackedFileCount} files in ${source} -> project '${project}'. Press Ctrl+C to stop.`);
-            watcher.on('sync', (uri: string, action: string) => console.log(`  ${action}: ${uri}`));
-            watcher.on('error', (err: Error, uri: string) => console.error(`  error syncing ${uri}: ${err.message}`));
             break;
         }
 

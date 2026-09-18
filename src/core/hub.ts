@@ -1,6 +1,7 @@
 import path from 'node:path';
-import { FolderWatcher, LocalDocumentIndex, LocalFileStorage } from 'vectra';
+import { LocalDocumentIndex, LocalFileStorage } from 'vectra';
 import type { EmbeddingsModel, FileStorage, LocalDocumentResult } from 'vectra';
+import { KbFolderWatcher, syncSourceFolder } from './kb-sync';
 import type {
     ProjectInfo,
     SearchOptions,
@@ -261,42 +262,41 @@ export class VectorHub {
     }
 
     /**
-     * One-shot full sync of a source folder into a project index.
+     * One-shot full sync of a source folder into a project index, with
+     * document-type and frontmatter metadata (see `kb-sync`).
      * @returns Number of files tracked after the sync.
      */
     public async syncFolder(project: string, sourceDir: string, options?: SyncOptions): Promise<number> {
-        const watcher = await this._startWatcher(project, sourceDir, options);
-        const count = watcher.trackedFileCount;
-        await watcher.stop();
-        return count;
+        const index = this.getProjectIndex(project);
+        await this._ensureProjectFolder(project);
+        if (!(await index.isIndexCreated())) {
+            await index.createIndex({ version: 1 });
+        }
+        const result = await syncSourceFolder(index, sourceDir, options?.extensions);
+        return result.filesTracked;
     }
 
     /**
      * Starts a continuous watcher that keeps a project index in sync with a
-     * source folder (initial full sync, then incremental on file changes).
-     * Keep the returned watcher alive; call `stop()` to end it.
+     * source folder (initial full sync, then debounced incremental changes).
+     * Metadata-aware. Keep the returned watcher alive; call `stop()` to end it.
      */
-    public async watchFolder(project: string, sourceDir: string, options?: SyncOptions): Promise<FolderWatcher> {
+    public async watchFolder(project: string, sourceDir: string, options?: SyncOptions): Promise<KbFolderWatcher> {
         return await this._startWatcher(project, sourceDir, options);
     }
 
-    private async _startWatcher(project: string, sourceDir: string, options?: SyncOptions): Promise<FolderWatcher> {
+    private async _startWatcher(project: string, sourceDir: string, options?: SyncOptions): Promise<KbFolderWatcher> {
         this._requireEmbeddings();
         const index = this.getProjectIndex(project);
         await this._ensureProjectFolder(project);
         if (!(await index.isIndexCreated())) {
             await index.createIndex({ version: 1 });
         }
-        const watcher = new FolderWatcher({
-            index,
-            paths: [path.resolve(sourceDir)],
+        const watcher = new KbFolderWatcher(index, path.resolve(sourceDir), {
             extensions: options?.extensions ?? ['.md', '.txt', '.html'],
             debounceMs: options?.debounceMs,
         });
-        await new Promise<void>((resolve, reject) => {
-            watcher.once('ready', resolve);
-            watcher.start().catch(reject);
-        });
+        await watcher.start();
         return watcher;
     }
 
