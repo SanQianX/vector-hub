@@ -46,6 +46,9 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                 case 'GET /index.html':
                     return await serveUi(res, uiCandidates);
 
+                case 'GET /vendor/marked.min.js':
+                    return await serveStatic(res, path.resolve(path.dirname(uiCandidatesFallback(uiCandidates)), 'vendor', 'marked.min.js'), 'application/javascript; charset=utf-8');
+
                 case 'GET /api/projects': {
                     const projects = await hub.listProjects();
                     const registrations = manager.registrations;
@@ -235,6 +238,20 @@ async function serveUi(res: http.ServerResponse, candidates: string[]): Promise<
         }
     }
     sendJson(res, 500, { error: 'ui/index.html not found. Pass ServerOptions.uiPath.' });
+}
+
+async function serveStatic(res: http.ServerResponse, filePath: string, contentType: string): Promise<void> {
+    try {
+        const content = await fs.promises.readFile(filePath);
+        res.writeHead(200, { 'Content-Type': contentType, ...corsHeaders() });
+        res.end(content);
+    } catch {
+        sendJson(res, 404, { error: `Not found: ${path.basename(filePath)}` });
+    }
+}
+
+function uiCandidatesFallback(candidates: string[]): string {
+    return candidates[candidates.length - 1] ?? path.resolve(process.cwd(), 'ui', 'index.html');
 }
 
 function readJsonBody(req: http.IncomingMessage): Promise<any> {

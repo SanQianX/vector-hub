@@ -5,581 +5,912 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>vector-hub · 向量检索控制台</title>
 <style>
+  /* 设计 token（ui-preview.html v3 定稿：ZCode 风格灰阶四层 + 单一蓝色 + 语义红绿） */
   :root {
-    --bg: #0f1117;
-    --bg-panel: #161a23;
-    --bg-card: #1b202c;
-    --border: #262c3a;
-    --text: #d7dce6;
-    --text-dim: #8b93a5;
-    --accent: #4f8cff;
-    --accent-dim: #2c4a80;
-    --good: #3fb96b;
-    --warn: #d9a13c;
-    --bad: #e05252;
+    --bg-side: #1b1c1f;
+    --bg-main: #212226;
+    --bg-card: #2a2b30;
+    --bg-input: #333439;
+    --bg-hover: #303237;
+    --bg-active: #36383e;
+    --line: #3a3b40;
+    --text: #e8e8ea;
+    --text-2: #a0a1a5;
+    --text-3: #6b6c70;
+    --label: #8a8b90;
+    --blue: #3b82f6;
+    --green: #34d399;
+    --red: #e5695e;
+    --mono: Consolas, "Microsoft YaHei", monospace;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; transition: background-color .12s ease, color .12s ease, border-color .12s ease, opacity .12s ease; }
+  html, body { height: 100%; }
   body {
-    background: var(--bg); color: var(--text);
-    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
-    font-size: 14px; height: 100vh; display: flex; flex-direction: column;
+    background: var(--bg-main); color: var(--text);
+    font: 13px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    overflow: hidden; display: flex; flex-direction: column;
   }
-  header {
-    display: flex; align-items: center; gap: 12px;
-    padding: 12px 20px; border-bottom: 1px solid var(--border);
-    background: var(--bg-panel);
-  }
-  header .logo { font-size: 16px; font-weight: 700; letter-spacing: 0.5px; }
-  header .logo span { color: var(--accent); }
-  header .endpoint {
-    font-family: Consolas, monospace; font-size: 12px; color: var(--text-dim);
-    background: var(--bg); border: 1px solid var(--border);
-    padding: 3px 10px; border-radius: 4px;
-  }
-  header .spacer { flex: 1; }
-  header .health { font-size: 12px; color: var(--text-dim); }
-  header .health .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 4px; }
-  header .icon-btn {
-    background: none; border: 1px solid var(--border); color: var(--text-dim);
-    border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 13px;
-  }
-  header .icon-btn:hover { color: var(--text); border-color: var(--accent); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #45464b; border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  .svg-i { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
+  *:focus-visible { outline: 1px solid var(--blue); outline-offset: 1px; border-radius: 6px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
-  main { flex: 1; display: flex; overflow: hidden; }
+  #app { flex: 1; display: flex; min-height: 0; }
+  aside { width: 248px; min-width: 248px; background: var(--bg-side); display: flex; flex-direction: column; }
+  .brand { display: flex; align-items: center; gap: 8px; padding: 14px 14px 10px; }
+  .brand .mark { width: 22px; height: 22px; border-radius: 6px; background: var(--text); color: #16171a; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .brand .name { font-size: 13px; font-weight: 600; }
+  .brand .name em { font-style: normal; color: var(--text-3); font-weight: 400; }
 
-  aside {
-    width: 280px; min-width: 280px; border-right: 1px solid var(--border);
-    background: var(--bg-panel); display: flex; flex-direction: column;
-  }
-  aside .head {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 16px; border-bottom: 1px solid var(--border);
-  }
-  aside .head h2 { font-size: 13px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
-  aside .head button {
-    background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px;
-  }
-  aside .head button:hover { text-decoration: underline; }
-  #project-list { flex: 1; overflow-y: auto; padding: 8px; }
-  .project {
-    display: flex; align-items: center; gap: 8px;
-    padding: 9px 10px; border-radius: 6px; margin-bottom: 2px;
-  }
-  .project:hover { background: var(--bg-card); }
-  .project input[type=checkbox] { accent-color: var(--accent); }
-  .project .name { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .project .count { font-size: 11px; color: var(--text-dim); }
-  .project .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .project .watch-flag { font-size: 11px; color: var(--accent); flex-shrink: 0; }
-  .project .del {
-    background: none; border: none; color: var(--text-dim); cursor: pointer;
-    font-size: 13px; padding: 0 3px; border-radius: 3px; flex-shrink: 0;
-  }
-  .project .del:hover { color: var(--bad); }
-  .dot.ok { background: var(--good); }
-  .dot.empty { background: var(--text-dim); opacity: 0.4; }
-  .dot.error { background: var(--bad); }
-  aside .footer { padding: 10px; border-top: 1px solid var(--border); }
-  aside .footer button {
-    width: 100%; padding: 8px; background: var(--accent-dim); color: #cfe0ff;
-    border: 1px solid var(--accent); border-radius: 6px; cursor: pointer; font-size: 13px;
-  }
-  aside .footer button:hover { background: var(--accent); color: #fff; }
+  .side-scroll { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+  .proj-filter { display: flex; align-items: center; gap: 6px; height: 28px; background: var(--bg-input); border-radius: 7px; padding: 0 8px; color: var(--text-3); margin: 2px 0 4px; }
+  .proj-filter input { flex: 1; border: none; background: none; outline: none; color: var(--text); font-size: 12px; min-width: 0; }
+  .proj-filter input::placeholder { color: var(--text-3); }
 
-  section.content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .searchbar {
-    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-    padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--bg-panel);
-  }
-  .searchbar input[type=text] {
-    flex: 1; min-width: 300px; padding: 9px 14px; font-size: 14px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text);
-  }
-  .searchbar input[type=text]:focus { outline: none; border-color: var(--accent); }
-  .searchbar button.primary {
-    padding: 9px 24px; background: var(--accent); color: #fff; border: none;
-    border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600;
-  }
-  .searchbar button.primary:hover { background: #3d7aee; }
-  .searchbar button.primary:disabled { background: var(--accent-dim); cursor: wait; }
-  .searchbar .ctrl { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
-  .searchbar input[type=range] { accent-color: var(--accent); width: 100px; }
-  .searchbar input[type=checkbox] { accent-color: var(--accent); }
-  .searchbar input[type=number] {
-    width: 56px; padding: 5px; background: var(--bg); border: 1px solid var(--border);
-    border-radius: 4px; color: var(--text); font-size: 12px;
-  }
+  .group-label { font-size: 11px; color: var(--label); letter-spacing: .05em; padding: 8px 8px 6px; display: flex; align-items: center; gap: 6px; }
+  .group-label .sel { color: var(--text-3); font-family: var(--mono); font-weight: 400; }
+  .group-label .grow { flex: 1; }
+  .group-label .op { color: var(--text-3); font-size: 11px; padding: 0 2px; }
+  .group-label .op:hover { color: var(--text); }
 
-  .status {
-    padding: 8px 20px; font-size: 12px; color: var(--text-dim);
-    border-bottom: 1px solid var(--border); font-family: Consolas, monospace;
-    min-height: 33px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-  }
-  .status .api { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; }
+  .proj { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px; color: var(--text-2); cursor: pointer; user-select: none; }
+  .proj:hover { background: var(--bg-hover); color: var(--text); }
+  .proj.on { background: var(--bg-active); color: var(--text); }
+  .proj .cb { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--line); flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #16171a; }
+  .proj.on .cb { background: var(--text); border-color: var(--text); }
+  .proj .cb .svg-i { display: none; }
+  .proj.on .cb .svg-i { display: block; }
+  .proj .pn { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+  .proj .cnt { font-size: 11px; font-family: var(--mono); color: var(--text-3); }
+  .proj .watch-ic { color: var(--text-3); }
+  .proj .del { opacity: 0; width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--text-3); }
+  .proj:hover .del { opacity: 1; }
+  .proj .del:hover { color: var(--red); background: rgba(229,105,94,.1); }
 
-  #results { flex: 1; overflow-y: auto; padding: 16px 20px; }
-  .placeholder { color: var(--text-dim); text-align: center; margin-top: 80px; font-size: 13px; line-height: 2; }
-  .card {
-    background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
-    padding: 14px 16px; margin-bottom: 10px;
-  }
-  .card .row1 { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-  .badge {
-    font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 10px;
-    font-family: Consolas, monospace;
-  }
-  .badge.hi { background: rgba(63,185,107,0.15); color: var(--good); }
-  .badge.mid { background: rgba(217,161,60,0.15); color: var(--warn); }
-  .badge.lo { background: rgba(139,147,165,0.15); color: var(--text-dim); }
-  .chip {
-    font-size: 11px; padding: 2px 8px; border-radius: 4px;
-    background: var(--accent-dim); color: #cfe0ff;
-  }
-  .card .uri { font-size: 12px; color: var(--text-dim); font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-  .card .snippet { font-size: 13px; line-height: 1.7; color: var(--text); }
-  .card .snippet mark { background: rgba(79,140,255,0.3); color: #fff; border-radius: 2px; padding: 0 2px; }
-  .error-box {
-    background: rgba(224,82,82,0.1); border: 1px solid var(--bad); color: #f0a0a0;
-    border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; font-size: 13px;
-  }
+  .import-row { margin-top: 6px; height: 32px; border: 1px dashed var(--line); border-radius: 6px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--text-3); font-size: 12px; cursor: pointer; width: 100%; }
+  .import-row:hover { color: var(--text); border-color: var(--text-3); }
 
-  /* ---- modal ---- */
-  .modal-mask {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55);
-    z-index: 50; align-items: center; justify-content: center;
-  }
+  .side-empty { border: 1px dashed var(--line); border-radius: 9px; margin-top: 8px; padding: 20px 12px; text-align: center; color: var(--text-3); }
+  .side-empty .tile { width: 32px; height: 32px; border-radius: 8px; background: var(--bg-card); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 6px; }
+  .side-empty .t1 { font-size: 12px; color: var(--text-2); }
+  .side-empty .t2 { font-size: 11px; margin-top: 2px; }
+
+  .side-foot { padding: 10px 14px; display: flex; align-items: center; gap: 8px; }
+  .side-foot .dot { width: 6px; height: 6px; border-radius: 99px; background: var(--green); }
+  .side-foot .dot.warn { background: var(--text-2); }
+  .side-foot .st { font-size: 11px; color: var(--text-3); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .icon-btn { width: 24px; height: 24px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+  .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .topbar { display: flex; align-items: center; gap: 10px; padding: 10px 20px; }
+  .topbar h1 { font-size: 14px; font-weight: 600; }
+  .topbar .sub { font-size: 11px; color: var(--text-3); font-family: var(--mono); }
+  .topbar .grow { flex: 1; }
+
+  .banner { margin: 0 20px 8px; border-radius: 8px; background: var(--bg-card); border: 1px solid var(--line); padding: 8px 14px; font-size: 12.5px; color: var(--text-2); display: none; align-items: center; gap: 10px; max-width: 880px; }
+  .banner.show { display: flex; }
+  .banner .bar { flex: 1; height: 4px; border-radius: 99px; background: var(--bg-input); overflow: hidden; min-width: 80px; }
+  .banner .bar .fill { height: 100%; background: var(--text-2); border-radius: 99px; transition: width .4s ease; }
+  .banner .bar.indet .fill { width: 35%; animation: indet 1.2s ease-in-out infinite alternate; }
+  @keyframes indet { from { margin-left: 0; } to { margin-left: 65%; } }
+
+  .search-zone { padding: 0 20px; }
+  .search-row { max-width: 860px; margin: 0 auto; display: flex; gap: 8px; }
+  .search-box { flex: 1; height: 34px; display: flex; align-items: center; gap: 8px; background: var(--bg-input); border-radius: 10px; padding: 0 12px; color: var(--text-3); }
+  .search-box:focus-within { outline: 1px solid var(--blue); }
+  .search-box.disabled { opacity: .45; }
+  .search-box input { flex: 1; border: none; background: none; outline: none; color: var(--text); font: inherit; }
+  .search-box input::placeholder { color: var(--text-3); }
+  .cta { height: 34px; padding: 0 18px; border-radius: 10px; background: var(--text); color: #16171a; font-weight: 600; font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
+  .cta:hover { background: #fff; }
+  .cta:disabled { opacity: .45; cursor: not-allowed; }
+  .cta .ring { width: 13px; height: 13px; border-radius: 99px; border: 2px solid #16171a; border-top-color: transparent; border-right-color: transparent; animation: spin 1s linear infinite; display: none; }
+  .cta.busy .ring { display: block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .filter-row { max-width: 860px; margin: 8px auto 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .fchip { height: 22px; padding: 0 10px; border-radius: 99px; font-size: 11px; background: var(--bg-card); color: var(--text-2); border: 1px solid transparent; }
+  .fchip:hover { color: var(--text); }
+  .fchip.on { color: var(--text); border-color: var(--line); background: var(--bg-input); font-weight: 600; }
+  .filter-row .sep { width: 1px; height: 12px; background: var(--line); margin: 0 4px; }
+  .filter-row .mini { font-size: 11px; color: var(--text-3); display: flex; align-items: center; gap: 4px; }
+  .filter-row .mini input { accent-color: var(--text-2); }
+  .filter-row .mini input[type=range] { width: 68px; }
+  .filter-row .mini .mv { font-family: var(--mono); width: 34px; }
+  .filter-row .mini input[type=number] { width: 42px; background: var(--bg-input); border: none; border-radius: 6px; color: var(--text); font-size: 11px; }
+
+  .results-wrap { flex: 1; overflow-y: auto; padding: 12px 20px 24px; }
+  .results { max-width: 860px; margin: 0 auto; }
+  .res-meta { font-size: 11px; color: var(--text-3); font-family: var(--mono); padding: 2px 2px 10px; display: flex; gap: 14px; flex-wrap: wrap; }
+
+  .res { border-radius: 8px; background: var(--bg-card); padding: 8px 12px; margin-bottom: 6px; cursor: pointer; }
+  .res:hover { background: var(--bg-hover); }
+  .res .r1 { display: flex; align-items: center; gap: 8px; }
+  .t-badge { font-size: 11px; padding: 1px 8px; border-radius: 99px; flex-shrink: 0; color: var(--text-2); border: 1px solid var(--line); font-weight: 500; }
+  .res .fname { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .res .grow { flex: 1; }
+  .res .score { font-family: var(--mono); font-size: 11px; color: var(--text-2); flex-shrink: 0; }
+  .res .chunkpos { font-family: var(--mono); font-size: 11px; color: var(--text-3); flex-shrink: 0; }
+  .res .r2 { font-size: 11px; color: var(--text-3); font-family: var(--mono); padding: 2px 0 4px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .res .r2 .mods { color: var(--blue); }
+  .res .r2 .more { color: var(--text-3); }
+  .res .r3 { font-size: 12.5px; color: var(--text-2); line-height: 1.65; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .res .r3 mark { background: #3d3f46; color: var(--text); border-radius: 2px; padding: 0 2px; }
+
+  .skel { border-radius: 8px; background: var(--bg-card); padding: 10px 12px; margin-bottom: 6px; }
+  .skel .l1, .skel .l2, .skel .l3 { border-radius: 4px; background: linear-gradient(100deg, var(--bg-input) 40%, #3b3d43 50%, var(--bg-input) 60%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+  .skel .l1 { height: 14px; width: 55%; margin-bottom: 8px; }
+  .skel .l2 { height: 10px; width: 40%; margin-bottom: 6px; }
+  .skel .l3 { height: 10px; width: 90%; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+
+  .empty { max-width: 860px; margin: 40px auto 0; text-align: center; }
+  .empty .box { border: 1px dashed var(--line); border-radius: 10px; padding: 28px 24px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .empty .tile { width: 36px; height: 36px; border-radius: 9px; background: var(--bg-card); display: flex; align-items: center; justify-content: center; color: var(--text-3); }
+  .empty .t1 { font-size: 13px; }
+  .empty .t2 { font-size: 11px; color: var(--text-3); }
+  .linklike { color: var(--blue); cursor: pointer; }
+  .linklike:hover { text-decoration: underline; }
+
+  .modal-mask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 50; align-items: center; justify-content: center; }
   .modal-mask.open { display: flex; }
-  .modal {
-    width: 460px; max-width: calc(100vw - 40px); max-height: calc(100vh - 80px); overflow-y: auto;
-    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px;
-    padding: 20px 22px;
-  }
-  .modal h3 { font-size: 15px; margin-bottom: 14px; }
-  .modal .field { margin-bottom: 12px; }
-  .modal .field label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 5px; }
-  .modal .field input[type=text], .modal .field input[type=password], .modal .field select {
-    width: 100%; padding: 8px 10px; font-size: 13px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text);
-  }
-  .modal .field input:focus, .modal .field select:focus { outline: none; border-color: var(--accent); }
-  .modal .field .hint { font-size: 11px; color: var(--text-dim); margin-top: 4px; line-height: 1.5; }
-  .modal .check { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 12px; }
-  .modal .check input { accent-color: var(--accent); }
-  .modal .warn-box {
-    background: rgba(217,161,60,0.12); border: 1px solid var(--warn); color: #e8c27a;
-    border-radius: 6px; padding: 8px 12px; font-size: 12px; line-height: 1.6; margin-bottom: 12px;
-  }
-  .modal .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
-  .modal .actions button {
-    padding: 8px 20px; border-radius: 6px; cursor: pointer; font-size: 13px; border: 1px solid var(--border);
-    background: none; color: var(--text-dim);
-  }
-  .modal .actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-  .modal .actions button:disabled { opacity: 0.5; cursor: wait; }
-  .modal .progress-wrap { margin-top: 14px; display: none; }
-  .modal .progress-wrap.show { display: block; }
-  .modal .progress-text { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
-  .modal .progress-bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
-  .modal .progress-bar .fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.4s; }
-  .modal .error-text { color: var(--bad); font-size: 12px; margin-top: 8px; }
+  .modal { width: min(480px,92vw); max-height: calc(100vh - 80px); overflow-y: auto; border-radius: 14px; background: var(--bg-card); border: 1px solid var(--line); padding: 20px; }
+  .modal h3 { font-size: 14px; font-weight: 600; }
+  .modal .sub { font-size: 12px; color: var(--text-3); margin: 2px 0 14px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: var(--text-2); margin-bottom: 5px; }
+  .field .fin, .field select.fin { width: 100%; height: 32px; padding: 0 10px; font: inherit; background: var(--bg-input); border: none; border-radius: 8px; color: var(--text); }
+  .field .fin:focus { outline: 1px solid var(--blue); }
+  .field .note { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  .btn-sec { height: 30px; padding: 0 14px; border-radius: 8px; background: var(--bg-input); color: var(--text-2); font-size: 12.5px; }
+  .btn-sec:hover { color: var(--text); }
+  .btn-pri { height: 30px; padding: 0 16px; border-radius: 8px; background: var(--text); color: #16171a; font-size: 12.5px; font-weight: 600; }
+  .btn-pri:hover { background: #fff; }
+  .btn-pri:disabled { opacity: .45; cursor: not-allowed; }
+  .check-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); margin-bottom: 12px; }
+  .check-row input { accent-color: var(--text-2); }
+  .input-with-btn { display: flex; gap: 6px; }
+  .input-with-btn .fin { flex: 1; }
+  .set-section { font-size: 11px; color: var(--label); letter-spacing: .05em; border-top: 1px solid var(--line); padding-top: 12px; margin: 4px 0 10px; }
+  .ext-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .ext { display: inline-flex; align-items: center; gap: 4px; background: var(--bg-input); border-radius: 99px; padding: 2px 6px 2px 10px; font-size: 11.5px; font-family: var(--mono); color: var(--text-2); }
+  .ext-x { color: var(--text-3); font-size: 12px; line-height: 1; padding: 0 2px; }
+  .ext-x:hover { color: var(--red); }
+  .ext-add { font-size: 11.5px; color: var(--text-3); border: 1px dashed var(--line); border-radius: 99px; padding: 2px 10px; }
+  .ext-add:hover { color: var(--text); border-color: var(--text-3); }
+  .svc-info { font-size: 11.5px; color: var(--text-3); line-height: 1.6; }
+  .svc-info .mono { font-family: var(--mono); color: var(--text-2); }
+
+  #drawer-mask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 40; }
+  #drawer-mask.open { display: block; }
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 92vw); z-index: 41; background: var(--bg-card); border-left: 1px solid var(--line); transform: translateX(103%); transition: transform .18s cubic-bezier(.2,.9,.3,1); display: flex; flex-direction: column; }
+  #drawer.open { transform: translateX(0); }
+  .dr-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; }
+  .dr-head .back { display: none; }
+  .dr-head.hist .back { display: inline-flex; }
+  .dr-head .path { flex: 1; font-family: var(--mono); font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dr-meta { padding: 0 20px; }
+  .dr-meta .row1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .dr-meta h2 { font-size: 14px; font-weight: 600; }
+  .dr-meta .kv { display: flex; gap: 12px; flex-wrap: wrap; padding-top: 6px; font-size: 11px; font-family: var(--mono); color: var(--text-3); }
+  .dr-meta .kv .mods { color: var(--blue); }
+  .dr-toc { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 20px 0; }
+  .dr-toc a { font-size: 11px; color: var(--text-3); background: var(--bg-input); padding: 1px 8px; border-radius: 99px; cursor: pointer; }
+  .dr-toc a:hover { color: var(--text); }
+  .dr-body { flex: 1; overflow-y: auto; padding: 10px 20px 32px; }
+  .md { font-size: 13px; line-height: 1.7; }
+  .md h1 { font-size: 14px; margin: 18px 0 8px; font-weight: 600; }
+  .md h2 { font-size: 13px; margin: 14px 0 6px; font-weight: 600; color: var(--text-2); scroll-margin-top: 8px; }
+  .md h3 { font-size: 12.5px; margin: 12px 0 4px; color: var(--text-2); }
+  .md p { margin: 6px 0; color: var(--text-2); }
+  .md ul, .md ol { margin: 6px 0 6px 20px; color: var(--text-2); }
+  .md li { margin: 2px 0; }
+  .md code { font-family: var(--mono); font-size: 11px; background: var(--bg-input); padding: 1px 5px; border-radius: 4px; }
+  .md pre { background: var(--bg-side); border-radius: 9px; padding: 12px 14px; margin: 8px 0; overflow-x: auto; }
+  .md pre code { background: none; padding: 0; font-size: 11px; line-height: 1.6; color: var(--text-2); }
+  .md table { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 12px; }
+  .md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+  .md th { color: var(--text-3); font-weight: 600; }
+  .md a { color: var(--blue); cursor: pointer; }
+  .md a:hover { text-decoration: underline; }
+  .md blockquote { border-left: 2px solid var(--line); padding-left: 10px; color: var(--text-3); margin: 8px 0; }
+  .hit-block { background: var(--bg-input); border-left: 2px solid var(--text); border-radius: 0 6px 6px 0; padding: 8px 10px; margin: 10px -10px 10px -12px; position: relative; scroll-margin-top: 40px; }
+  .hit-block::before { content: "命中位置"; position: absolute; top: -8px; left: 12px; font-size: 10px; color: var(--text-3); background: var(--bg-card); padding: 0 6px; border-radius: 99px; }
+
+  #toasts { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 60; align-items: center; }
+  .toast { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 8px; font-size: 12.5px; background: var(--bg-card); border: 1px solid var(--line); color: var(--text-2); animation: t-in .14s ease; }
+  .toast.out { animation: t-out .16s ease forwards; }
+  .toast .ok-ic { color: var(--green); }
+  .toast .bad-ic { color: var(--red); }
+  @keyframes t-in { from { opacity: 0; transform: translateY(6px); } }
+  @keyframes t-out { to { opacity: 0; transform: translateY(4px); } }
 </style>
 </head>
 <body>
-<header>
-  <div class="logo">vector<span>-hub</span> 控制台</div>
-  <div class="endpoint">/api/search</div>
-  <div class="spacer"></div>
-  <div class="health" id="health"><span class="dot"></span>加载中…</div>
-  <button class="icon-btn" id="settings-btn" title="Embedding 设置">⚙ 设置</button>
-</header>
-<main>
+
+<div id="app">
   <aside>
-    <div class="head">
-      <h2>项目</h2>
-      <button id="toggle-all">全选</button>
+    <div class="brand">
+      <div class="mark">V</div>
+      <div class="name">vector-hub <em>控制台</em></div>
     </div>
-    <div id="project-list"><div class="placeholder">加载中…</div></div>
-    <div class="footer">
-      <button id="import-btn">📂 导入本地文件夹…</button>
+    <div class="side-scroll">
+      <div class="group-label">
+        <span>项目</span><span class="sel" id="sel-count"></span>
+        <span class="grow"></span>
+        <button class="op" id="sel-all">全选</button>
+        <button class="op" id="sel-none">清空</button>
+      </div>
+      <div class="proj-filter" id="proj-filter" style="display:none">
+        <span class="svg-i" data-i="search" data-s="12"></span>
+        <input id="proj-q" placeholder="过滤项目…">
+      </div>
+      <div id="proj-list"></div>
+      <div id="import-zone"></div>
+    </div>
+    <div class="side-foot">
+      <span class="dot" id="foot-dot"></span>
+      <span class="st" id="foot-st">连接中…</span>
+      <button class="icon-btn" id="settings-btn" title="设置">
+        <span class="svg-i" data-i="settings" data-s="15"></span>
+      </button>
     </div>
   </aside>
-  <section class="content">
-    <div class="searchbar">
-      <input type="text" id="query" placeholder="输入自然语言问题，回车或点击搜索…" autofocus>
-      <button class="primary" id="search-btn">搜索</button>
-      <div class="ctrl">TopK <input type="number" id="topk" value="10" min="1" max="50"></div>
-      <div class="ctrl">阈值 <input type="range" id="minscore" min="-1" max="1" step="0.05" value="0"><span id="minscore-val">0.00</span></div>
-      <div class="ctrl"><input type="checkbox" id="bm25"> 混合搜索</div>
+
+  <main>
+    <div class="topbar">
+      <h1>语义检索</h1>
+      <span class="sub" id="model-sub"></span>
+      <div class="grow"></div>
     </div>
-    <div class="status" id="status">就绪 — UI 与 AI 共用同一检索接口</div>
-    <div id="results"><div class="placeholder">输入问题开始检索<br>左侧勾选参与搜索的项目</div></div>
-  </section>
-</main>
+
+    <div class="banner" id="banner">
+      <span id="banner-text"></span>
+      <div class="bar" id="banner-bar" style="display:none"><div class="fill"></div></div>
+      <span class="linklike" id="banner-link" style="display:none">去设置</span>
+    </div>
+
+    <div class="search-zone">
+      <div class="search-row">
+        <div class="search-box" id="sbox">
+          <span class="svg-i" data-i="search" data-s="15"></span>
+          <input id="q" placeholder="输入自然语言问题，回车搜索…">
+        </div>
+        <button class="cta" id="search-btn"><span class="ring"></span>搜索</button>
+      </div>
+      <div class="filter-row" id="type-chips">
+        <button class="fchip on" data-t="">全部</button>
+        <button class="fchip" data-t="goal">目标</button>
+        <button class="fchip" data-t="architecture">架构</button>
+        <button class="fchip" data-t="change">变更</button>
+        <button class="fchip" data-t="module">模块</button>
+        <button class="fchip" data-t="index">索引</button>
+        <span class="sep"></span>
+        <label class="mini" title="语义 + BM25 关键词双通道检索，技术文档建议开启"><input type="checkbox" id="bm25" checked> 混合搜索</label>
+        <label class="mini" title="相似度低于该值的结果被过滤；短文档场景可能需要调到负值">阈值 <input type="range" id="minscore" min="-1" max="1" step="0.05" value="0"><span class="mv" id="minscore-val">0.00</span></label>
+        <label class="mini">TopK <input type="number" id="topk" value="10" min="1" max="50"></label>
+      </div>
+    </div>
+
+    <div class="results-wrap">
+      <div class="results" id="results"></div>
+    </div>
+  </main>
+</div>
 
 <!-- 设置弹窗 -->
 <div class="modal-mask" id="settings-modal">
   <div class="modal">
-    <h3>Embedding 模型设置</h3>
+    <h3>设置</h3>
+    <div class="sub">Embedding 模型与数据存储</div>
+
+    <div class="set-section">Embedding</div>
     <div class="field">
       <label>提供商</label>
-      <select id="set-provider">
-        <option value="minimax">MiniMax（embo-01，支持 Coding Plan 订阅 key）</option>
-        <option value="openai">OpenAI 兼容（自定义 endpoint / 模型）</option>
+      <select class="fin" id="set-provider">
+        <option value="minimax">MiniMax（embo-01 · 支持 Coding Plan 订阅 key）</option>
+        <option value="openai">OpenAI 兼容（自定义 endpoint）</option>
       </select>
     </div>
     <div class="field">
       <label>API Key</label>
-      <input type="password" id="set-apikey" placeholder="sk-..." autocomplete="off">
-      <div class="hint" id="set-apikey-hint">已配置的 key 只显示尾 4 位，保持不变可直接留空提交。</div>
+      <input class="fin" type="password" id="set-apikey" placeholder="sk-..." autocomplete="off">
+      <div class="note" id="set-apikey-note"></div>
     </div>
     <div class="field">
-      <label>模型名（可选）</label>
-      <input type="text" id="set-model" placeholder="默认 embo-01 / text-embedding-3-small">
+      <label>模型名</label>
+      <input class="fin" type="text" id="set-model" placeholder="默认 embo-01">
     </div>
-    <div class="field" id="set-endpoint-field" style="display:none">
-      <label>Endpoint（OpenAI 兼容 base URL，不含 /v1）</label>
-      <input type="text" id="set-endpoint" placeholder="https://api.siliconflow.cn">
+    <div class="field" id="endpoint-field" style="display:none">
+      <label>Endpoint（不含 /v1）</label>
+      <input class="fin" type="text" id="set-endpoint" placeholder="https://api.siliconflow.cn">
     </div>
-    <div class="warn-box">⚠ 切换模型会使现有索引的向量失效——保存后系统将从各项目的源文件夹自动重建索引；纯 API 写入、无源文件夹的项目需要手动重新导入。</div>
-    <div class="actions">
-      <button id="settings-cancel">取消</button>
-      <button class="primary" id="settings-save">保存</button>
+
+    <div class="set-section">数据与同步</div>
+    <div class="field">
+      <label>数据目录（向量库保存位置）</label>
+      <div class="input-with-btn">
+        <input class="fin" type="text" id="set-root" readonly>
+        <button class="btn-sec" id="set-root-browse">更改…</button>
+      </div>
+      <div class="note">切换目录后已有索引不会自动迁移；项目注册保留，重新同步即可恢复（源文件夹始终是权威数据）。</div>
     </div>
-    <div class="progress-wrap" id="rebuild-progress">
-      <div class="progress-text" id="rebuild-text">重建中…</div>
-      <div class="progress-bar"><div class="fill" id="rebuild-fill"></div></div>
-      <div class="error-text" id="rebuild-errors"></div>
+    <div class="field">
+      <label>同步文件类型</label>
+      <div class="ext-chips" id="ext-chips"></div>
+      <div class="note">文件夹同步和持续监听只处理这些扩展名。</div>
+    </div>
+    <div class="field">
+      <label>监听防抖（毫秒）</label>
+      <input class="fin" type="number" id="set-debounce" min="100" step="100" style="width:110px">
+      <div class="note">文件保存后等待该时长再同步，避免编辑器多次写盘触发重复索引。</div>
+    </div>
+
+    <div class="set-section">服务</div>
+    <div class="svc-info">运行于 <span class="mono" id="svc-url"></span> · 由启动参数 <span class="mono">--port</span> 指定，修改后需重启</div>
+
+    <div class="modal-actions">
+      <button class="btn-sec" id="settings-cancel">取消</button>
+      <button class="btn-pri" id="settings-save">保存</button>
     </div>
   </div>
 </div>
 
-<!-- 导入确认弹窗 -->
+<!-- 导入弹窗 -->
 <div class="modal-mask" id="import-modal">
   <div class="modal">
     <h3>导入本地文件夹</h3>
+    <div class="sub">支持 md / txt / html；原文档不修改，索引随时可重建</div>
     <div class="field">
-      <label>源文件夹路径</label>
-      <input type="text" id="imp-source" placeholder="D:\path\to\notes">
-      <div class="hint">支持 md / txt / html 文件；原文档不会被修改，索引是派生数据。</div>
+      <label>源文件夹</label>
+      <div class="input-with-btn">
+        <input class="fin" type="text" id="imp-path" placeholder="D:\knowledge\…">
+        <button class="btn-sec" id="imp-browse">浏览…</button>
+      </div>
     </div>
     <div class="field">
       <label>项目名</label>
-      <input type="text" id="imp-name" placeholder="默认取文件夹名">
+      <input class="fin" type="text" id="imp-name" placeholder="默认取文件夹名">
     </div>
-    <div class="check">
+    <div class="check-row">
       <input type="checkbox" id="imp-watch" checked>
       <label for="imp-watch" style="margin:0">持续同步（文件夹变化自动更新索引）</label>
     </div>
-    <div class="actions">
-      <button id="import-cancel">取消</button>
-      <button class="primary" id="import-confirm">导入</button>
+    <div class="modal-actions">
+      <button class="btn-sec" id="import-cancel">取消</button>
+      <button class="btn-pri" id="import-confirm">导入</button>
     </div>
-    <div class="error-text" id="import-error"></div>
   </div>
 </div>
 
+<!-- 文档抽屉 -->
+<div id="drawer-mask"></div>
+<div id="drawer">
+  <div class="dr-head" id="dr-head">
+    <button class="icon-btn back" id="dr-back"><span class="svg-i" data-i="back" data-s="15"></span></button>
+    <span class="path" id="dr-path"></span>
+    <button class="icon-btn" id="dr-close"><span class="svg-i" data-i="x" data-s="14"></span></button>
+  </div>
+  <div class="dr-meta">
+    <div class="row1"><span class="t-badge" id="dr-type"></span><h2 id="dr-title"></h2></div>
+    <div class="kv" id="dr-kv"></div>
+  </div>
+  <div class="dr-toc" id="dr-toc"></div>
+  <div class="dr-body"><div class="md" id="dr-body"></div></div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+<script src="/vendor/marked.min.js"></script>
 <script>
 (function () {
+  'use strict';
+  /* ============ 基础 ============ */
   const $ = (id) => document.getElementById(id);
-  const state = { projects: [], selected: new Set() };
+  const ICONS = {
+    'search': '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.8-3.8"/>',
+    'settings': '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+    'folder-plus': '<path d="M4 20h16a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 4.9A2 2 0 0 0 7.93 4H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2z"/><path d="M12 10v6M9 13h6"/>',
+    'check': '<path d="m4.5 12.5 5 5L19.5 7"/>',
+    'x': '<path d="M18 6 6 18M6 6l12 12"/>',
+    'back': '<path d="m14.5 5.5-7 6.5 7 6.5"/>',
+    'doc': '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+  };
+  function iconSvg(name, size) { return '<svg class="svg-i" width="' + size + '" height="' + size + '" viewBox="0 0 24 24">' + (ICONS[name] || '') + '</svg>'; }
+  document.querySelectorAll('[data-i]').forEach(el => { el.outerHTML = iconSvg(el.dataset.i, el.dataset.s || 14); });
 
-  // ---------- generic helpers ----------
+  function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function normalizeWs(s) { return String(s ?? '').replace(/\s+/g, ' ').trim(); }
+  function fmtCount(n) { return n >= 10000 ? (n / 1000).toFixed(1) + 'k' : String(n ?? 0); }
+  const TYPE_LABEL = { goal: '目标', architecture: '架构', change: '变更', module: '模块', 'change-index': '索引', 'module-index': '索引', readme: '说明', doc: '文档' };
+
   async function api(path, options) {
     const res = await fetch(path, options);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(data.error || ('HTTP ' + res.status)), { status: res.status });
     return data;
   }
-  function escapeHtml(s) {
-    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function toast(msg, bad) {
+    const host = $('toasts');
+    while (host.children.length >= 3) host.firstChild.remove();
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.innerHTML = '<span class="' + (bad ? 'bad-ic' : 'ok-ic') + '">' + iconSvg('check', 13) + '</span><span>' + escapeHtml(msg) + '</span>';
+    if (bad) t.querySelector('svg').outerHTML = iconSvg('x', 13);
+    host.appendChild(t);
+    setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 200); }, 3200);
   }
 
-  // ---------- projects sidebar ----------
+  /* ============ 全局状态 ============ */
+  const state = { projects: [], selected: new Set(), projQuery: '', typeFilter: '', configured: true, busy: false, rebuildTimer: null };
+
+  /* ============ 侧栏 ============ */
   async function loadProjects() {
     try {
       const data = await api('/api/projects');
       state.projects = data.projects || [];
-      if (state.selected.size == 0) {
-        state.projects.forEach(p => { if (p.hasIndex) state.selected.add(p.name); });
-      }
+      if (state.selected.size == 0) state.projects.forEach(p => { if (p.hasIndex) state.selected.add(p.name); });
       renderProjects();
-      renderHealth();
+      setFoot(true, state.projects.every(p => p.hasIndex) ? '索引正常' : (state.projects.length + ' 项目 · ' + state.projects.filter(p => !p.hasIndex).length + ' 个未建索引'));
     } catch (err) {
-      $('project-list').innerHTML = '<div class="placeholder">加载失败：' + escapeHtml(err.message) + '</div>';
-      setHealth('bad', '服务不可达');
+      $('proj-list').innerHTML = '<div class="side-empty"><div class="t2">加载失败：' + escapeHtml(err.message) + '</div></div>';
+      setFoot(false, '服务不可达');
     }
+    updateConfiguredUi();
+  }
+
+  function setFoot(ok, text) {
+    $('foot-dot').className = 'dot' + (ok ? '' : ' warn');
+    $('foot-st').textContent = text;
   }
 
   function renderProjects() {
-    const list = $('project-list');
-    list.innerHTML = '';
+    $('proj-filter').style.display = state.projects.length > 15 ? '' : 'none';
+    const list = state.projects.filter(p => !state.projQuery || p.name.toLowerCase().includes(state.projQuery.toLowerCase()));
+    const el = $('proj-list');
+    el.innerHTML = '';
+    $('import-zone').innerHTML = state.projects.length == 0 ? '' :
+      '<button class="import-row" id="import-btn">' + iconSvg('folder-plus', 14) + '导入本地文件夹</button>';
+
     if (state.projects.length == 0) {
-      list.innerHTML = '<div class="placeholder">还没有项目<br>点击下方导入本地文件夹</div>';
+      el.innerHTML = '<div class="side-empty"><div class="tile">' + iconSvg('doc', 16) + '</div>' +
+        '<div class="t1">还没有项目</div><div class="t2">导入一个知识库文件夹开始<br><span class="linklike" id="empty-import">导入本地文件夹</span></div></div>';
+      $('empty-import').addEventListener('click', openImport);
+      $('sel-count').textContent = '0/0';
       return;
     }
-    for (const p of state.projects) {
-      const row = document.createElement('label');
-      row.className = 'project';
-      const checked = state.selected.has(p.name) ? 'checked' : '';
-      const dot = p.hasIndex ? 'ok' : 'empty';
+    for (const p of list) {
+      const row = document.createElement('div');
+      row.className = 'proj' + (state.selected.has(p.name) ? ' on' : '');
       const tip = (p.hasIndex ? '索引正常' : '尚未建立索引') + (p.sourceDir ? '\n来源：' + p.sourceDir : '\nAPI 写入，无源文件夹');
+      row.title = tip;
       row.innerHTML =
-        '<input type="checkbox" ' + checked + '>' +
-        '<span class="dot ' + dot + '" title="' + escapeHtml(tip.split('\n')[0]) + '"></span>' +
-        '<span class="name" title="' + escapeHtml(tip).replace(/\n/g, '&#10;') + '">' + escapeHtml(p.name) + '</span>' +
-        (p.watching ? '<span class="watch-flag" title="持续同步中">⟳</span>' : '') +
-        '<span class="count">' + p.docCount + ' 篇</span>' +
-        '<button class="del" title="删除此项目索引（不动源文件夹）">×</button>';
-      row.querySelector('input').addEventListener('change', (e) => {
-        e.preventDefault();
-        if (e.target.checked) state.selected.add(p.name); else state.selected.delete(p.name);
+        '<span class="cb">' + iconSvg('check', 10) + '</span>' +
+        '<span class="pn">' + escapeHtml(p.name) + '</span>' +
+        (p.watching ? '<span class="watch-ic" title="持续同步中"><svg class="svg-i" width="12" height="12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span>' : '') +
+        '<span class="cnt">' + fmtCount(p.docCount) + '</span>' +
+        '<button class="del" title="删除索引（不动源文件）">' + iconSvg('x', 12) + '</button>';
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('.del')) {
+          e.stopPropagation();
+          if (confirm('删除项目 "' + p.name + '" 的索引？源文件夹不受影响。')) deleteProject(p.name);
+          return;
+        }
+        if (state.selected.has(p.name)) state.selected.delete(p.name); else state.selected.add(p.name);
         renderProjects();
       });
-      row.querySelector('.del').addEventListener('click', async (e) => {
-        e.preventDefault();
-        if (!confirm('删除项目 "' + p.name + '" 的索引？源文件夹不受影响。')) return;
-        try {
-          await api('/api/project?name=' + encodeURIComponent(p.name), { method: 'DELETE' });
-          state.selected.delete(p.name);
-          await loadProjects();
-        } catch (err) { alert('删除失败：' + err.message); }
-      });
-      list.appendChild(row);
+      el.appendChild(row);
     }
-    $('toggle-all').textContent = allSelected() ? '反选' : '全选';
+    if (list.length == 0) {
+      el.innerHTML = '<div class="side-empty"><div class="t2">没有匹配 “' + escapeHtml(state.projQuery) + '” 的项目</div></div>';
+    }
+    const btn = document.getElementById('import-btn');
+    if (btn) btn.addEventListener('click', openImport);
+    $('sel-count').textContent = state.projects.filter(p => state.selected.has(p.name)).length + '/' + state.projects.length;
   }
 
-  $('toggle-all').addEventListener('click', () => {
-    if (allSelected()) state.selected.clear();
-    else state.projects.forEach(p => state.selected.add(p.name));
-    renderProjects();
-  });
+  $('sel-all').addEventListener('click', () => { state.projects.forEach(p => state.selected.add(p.name)); renderProjects(); });
+  $('sel-none').addEventListener('click', () => { state.selected.clear(); renderProjects(); });
+  $('proj-q').addEventListener('input', (e) => { state.projQuery = e.target.value.trim(); renderProjects(); });
 
-  function allSelected() {
-    return state.projects.length > 0 && state.projects.every(p => state.selected.has(p.name));
-  }
-
-  function renderHealth() {
-    const bad = state.projects.filter(p => !p.hasIndex).length;
-    if (state.projects.length == 0) setHealth('empty', '无项目');
-    else if (bad == 0) setHealth('ok', state.projects.length + ' 个项目 · 索引全部正常');
-    else setHealth('warn', state.projects.length + ' 个项目 · ' + bad + ' 个未建索引');
-  }
-
-  function setHealth(kind, text) {
-    const color = kind == 'ok' ? 'var(--good)' : kind == 'warn' ? 'var(--warn)' : kind == 'empty' ? 'var(--text-dim)' : 'var(--bad)';
-    $('health').innerHTML = '<span class="dot" style="background:' + color + '"></span>' + text;
-  }
-
-  // ---------- search ----------
-  async function doSearch() {
-    const q = $('query').value.trim();
-    if (!q) return;
-    const params = new URLSearchParams({ q });
-    if (state.selected.size > 0) params.set('projects', [...state.selected].join(','));
-    params.set('maxResults', $('topk').value || '10');
-    params.set('minScore', $('minscore').value);
-    if ($('bm25').checked) params.set('isBm25', 'true');
-
-    const apiUrl = '/api/search?' + params.toString();
-    $('status').innerHTML = '检索中… <span class="api">GET ' + escapeHtml(apiUrl) + '</span>';
-    $('search-btn').disabled = true;
-
+  async function deleteProject(name) {
     try {
-      const data = await api(apiUrl);
-      renderResults(q, data, apiUrl);
-    } catch (err) {
-      $('results').innerHTML = '<div class="error-box">检索失败：' + escapeHtml(err.message) + '</div>';
-      $('status').textContent = '检索失败';
-    } finally {
-      $('search-btn').disabled = false;
-    }
+      await api('/api/project?name=' + encodeURIComponent(name), { method: 'DELETE' });
+      state.selected.delete(name);
+      toast('已删除项目 "' + name + '" 的索引');
+      await loadProjects();
+    } catch (err) { toast('删除失败：' + err.message, true); }
   }
 
-  function renderResults(q, data, apiUrl) {
-    const boxes = [];
-    for (const e of data.errors || []) {
-      boxes.push('<div class="error-box">项目 <b>' + escapeHtml(e.project) + '</b> 检索出错：' + escapeHtml(e.message) + '</div>');
-    }
-    const skipped = (data.projectsSkipped || []).length
-      ? '（跳过未建索引：' + escapeHtml(data.projectsSkipped.join(', ')) + '）' : '';
-    if ((data.results || []).length == 0) {
-      boxes.push('<div class="placeholder">没有命中结果<br>试着降低阈值或改写问题</div>');
-    }
-    data.results.forEach((r, i) => {
-      const cls = r.score >= 0.5 ? 'hi' : r.score >= 0.3 ? 'mid' : 'lo';
-      boxes.push(
-        '<div class="card">' +
-          '<div class="row1">' +
-            '<span class="badge ' + cls + '">' + r.score.toFixed(4) + '</span>' +
-            '<span class="chip">' + escapeHtml(r.project) + '</span>' +
-            '<span class="uri">' + escapeHtml(r.uri) + '</span>' +
-          '</div>' +
-          '<div class="snippet">' + (i + 1) + '. ' + highlight(r.snippet, q) + '</div>' +
-        '</div>'
-      );
-    });
-    $('results').innerHTML = boxes.join('');
-    $('status').innerHTML =
-      '<span>' + (data.results || []).length + ' 条结果 · ' + data.tookMs + ' ms · 搜索 ' + (data.projectsSearched || []).length + ' 个项目' + skipped + '</span>' +
-      '<span class="api" title="AI 调用同一接口">GET ' + escapeHtml(apiUrl) + '</span>';
+  /* ============ 未配置 / 重建 banner ============ */
+  function updateConfiguredUi() {
+    const unconfigured = !state.configured;
+    $('sbox').classList.toggle('disabled', unconfigured);
+    $('q').disabled = unconfigured;
+    $('search-btn').disabled = unconfigured || state.busy;
+    $('banner').classList.toggle('show', unconfigured);
+    $('banner-text').textContent = unconfigured ? '尚未配置 Embedding 模型，搜索不可用。' : $('banner-text').textContent;
+    $('banner-link').style.display = unconfigured ? '' : 'none';
+    $('model-sub').textContent = unconfigured ? '未配置' : state.modelSub || '';
   }
 
-  function highlight(snippet, query) {
-    const safe = escapeHtml(snippet);
-    const terms = [...new Set(query.split(/\s+/).filter(t => t.length > 1))];
-    if (terms.length == 0) return safe;
-    const pattern = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  async function refreshHealth() {
     try {
-      return safe.replace(new RegExp('(' + pattern + ')', 'gi'), '<mark>$1</mark>');
-    } catch {
-      return safe;
-    }
+      const h = await api('/api/health');
+      state.modelSub = h.embeddings && h.embeddings.model && h.embeddings.model != 'not configured' ? h.embeddings.model : '';
+      updateConfiguredUi();
+    } catch { /* foot already shows */ }
   }
-
-  // ---------- settings modal ----------
-  let rebuildPollTimer = null;
-
-  $('settings-btn').addEventListener('click', async () => {
-    try {
-      const data = await api('/api/settings');
-      $('set-provider').value = data.settings?.provider || 'minimax';
-      $('set-apikey').value = data.settings?.apiKey || '';
-      $('set-model').value = data.settings?.model || '';
-      $('set-endpoint').value = data.settings?.endpoint || '';
-      toggleEndpointField();
-      $('rebuild-progress').classList.remove('show');
-      $('settings-modal').classList.add('open');
-    } catch (err) {
-      alert('读取设置失败：' + err.message);
-    }
-  });
-
-  function toggleEndpointField() {
-    $('set-endpoint-field').style.display = $('set-provider').value == 'openai' ? '' : 'none';
-  }
-  $('set-provider').addEventListener('change', toggleEndpointField);
-  $('settings-cancel').addEventListener('click', () => {
-    clearInterval(rebuildPollTimer);
-    $('settings-modal').classList.remove('open');
-  });
-
-  $('settings-save').addEventListener('click', async () => {
-    const key = $('set-apikey').value.trim();
-    if (!key) { alert('请填写 API Key（已配置且不变时可输入掩码值提交）。'); return; }
-    $('settings-save').disabled = true;
-    try {
-      const data = await api('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: $('set-provider').value,
-          apiKey: key,
-          model: $('set-model').value.trim() || undefined,
-          endpoint: $('set-endpoint').value.trim() || undefined,
-        }),
-      });
-      if (data.rebuildTriggered) {
-        $('rebuild-progress').classList.add('show');
-        pollRebuild();
-      } else {
-        clearInterval(rebuildPollTimer);
-        $('settings-modal').classList.remove('open');
-        await loadProjects();
-      }
-    } catch (err) {
-      alert('保存失败：' + err.message);
-    } finally {
-      $('settings-save').disabled = false;
-    }
-  });
 
   function pollRebuild() {
-    clearInterval(rebuildPollTimer);
-    rebuildPollTimer = setInterval(async () => {
+    clearInterval(state.rebuildTimer);
+    $('banner').classList.add('show');
+    $('banner-link').style.display = 'none';
+    state.rebuildTimer = setInterval(async () => {
       try {
         const s = await api('/api/rebuild/status');
         const pct = s.total > 0 ? Math.round((s.done / s.total) * 100) : 100;
-        $('rebuild-fill').style.width = pct + '%';
-        $('rebuild-text').textContent = s.running
-          ? '重建中：' + s.done + ' / ' + s.total + (s.currentProject ? '（' + s.currentProject + '）' : '')
-          : '重建完成：' + s.done + ' / ' + s.total
-            + (s.manual.length ? '；需手动处理：' + s.manual.join(', ') : '')
-            + (s.errors.length ? '；' + s.errors.length + ' 个失败' : '');
+        $('banner-bar').style.display = s.running ? '' : 'none';
+        $('banner-bar').className = 'bar' + (s.running ? '' : '');
+        $('banner-bar').querySelector('.fill').style.width = pct + '%';
+        $('banner-text').textContent = s.running
+          ? '正在按新模型重建索引：' + s.done + '/' + s.total + (s.currentProject ? '（' + s.currentProject + '）' : '')
+          : '重建完成：' + s.done + '/' + s.total + (s.manual.length ? '；需手动处理：' + s.manual.join(', ') : '') + (s.errors.length ? '；' + s.errors.length + ' 个失败' : '');
         if (!s.running) {
-          clearInterval(rebuildPollTimer);
-          $('rebuild-errors').textContent = s.errors.map(e => e.project + ': ' + e.message).join('; ');
+          clearInterval(state.rebuildTimer);
+          setTimeout(() => { if (state.configured) $('banner').classList.remove('show'); }, 4000);
           await loadProjects();
         }
       } catch { /* transient */ }
     }, 800);
   }
 
-  // ---------- import flow ----------
-  $('import-btn').addEventListener('click', async () => {
-    $('import-error').textContent = '';
-    let picked = null;
+  /* ============ 搜索 ============ */
+  async function runSearch() {
+    const q = $('q').value.trim();
+    if (!q || state.busy || !state.configured) return;
+    state.busy = true;
+    $('search-btn').disabled = true;
+    $('search-btn').classList.add('busy');
+    $('results').innerHTML = [1, 2, 3].map(() => '<div class="skel"><div class="l1"></div><div class="l2"></div><div class="l3"></div></div>').join('');
     try {
-      const data = await api('/api/system/pick-folder');
-      picked = data.path;
+      const params = new URLSearchParams({ q });
+      if (state.selected.size > 0) params.set('projects', [...state.selected].join(','));
+      const docTypes = typeFilterValues();
+      if (docTypes.length) params.set('docTypes', docTypes.join(','));
+      params.set('maxResults', $('topk').value || '10');
+      params.set('minScore', $('minscore').value);
+      if ($('bm25').checked) params.set('isBm25', 'true');
+      const data = await api('/api/search?' + params.toString());
+      renderResults(q, data, '/api/search?' + params.toString());
     } catch (err) {
-      if (err.status != 501 && err.status != 500) {
-        alert('打开文件夹选择器失败：' + err.message);
-        return;
-      }
-      // picker unavailable — fall through to manual entry
+      $('results').innerHTML = '<div class="empty"><div class="box"><div class="t1">检索失败</div><div class="t2">' + escapeHtml(err.message) + '</div></div></div>';
+    } finally {
+      state.busy = false;
+      $('search-btn').classList.remove('busy');
+      $('search-btn').disabled = !state.configured;
     }
-    if (picked) {
-      $('imp-source').value = picked;
-      const seg = picked.split(/[\\/]/).filter(Boolean).pop() || '';
-      $('imp-name').value = seg;
-    } else {
-      $('imp-source').value = '';
-      $('imp-name').value = '';
+  }
+
+  function typeFilterValues() {
+    if (!state.typeFilter) return [];
+    if (state.typeFilter == 'index') return ['change-index', 'module-index'];
+    return [state.typeFilter];
+  }
+
+  function renderResults(q, data, apiUrl) {
+    const el = $('results');
+    if (state.projects.length == 0) {
+      el.innerHTML = '<div class="empty"><div class="box"><div class="tile">' + iconSvg('doc', 18) + '</div><div class="t1">知识库还是空的</div><div class="t2"><span class="linklike" id="go-import">导入本地文件夹</span>，或通过 API 写入第一批文档</div></div></div>';
+      $('go-import').addEventListener('click', openImport);
+      return;
+    }
+    const errors = (data.errors || []).map(e => '<div class="empty" style="margin:0 0 8px"><div class="box" style="border-color:var(--red);padding:8px 14px"><div class="t2">项目 ' + escapeHtml(e.project) + ' 检索出错：' + escapeHtml(e.message) + '</div></div></div>').join('');
+    if ((data.results || []).length == 0) {
+      el.innerHTML = errors + '<div class="empty"><div class="box"><div class="tile">' + iconSvg('doc', 18) + '</div><div class="t1">没有命中结果</div><div class="t2">试着切换类型过滤、降低阈值，或改写问题</div></div></div>';
+      return;
+    }
+    const skipped = (data.projectsSkipped || []).length ? '（跳过未建索引：' + escapeHtml(data.projectsSkipped.join(', ')) + '）' : '';
+    el.innerHTML = errors + '<div class="res-meta"><span>' + data.results.length + ' 条结果 · ' + data.tookMs + 'ms · ' + (data.projectsSearched || []).length + ' 项目' + skipped + '</span><span>GET ' + escapeHtml(apiUrl.length > 90 ? apiUrl.slice(0, 90) + '…' : apiUrl) + '</span></div>';
+    for (const r of data.results) {
+      const row = document.createElement('div');
+      row.className = 'res';
+      const badge = TYPE_LABEL[r.docType] || r.docType || '文档';
+      const r2 = [];
+      if (r.date) r2.push(escapeHtml(r.date));
+      if (r.commit) r2.push(escapeHtml(String(r.commit).slice(0, 7)));
+      if (r.modules) r2.push('<span class="mods">' + truncList(r.modules) + '</span>');
+      if (r.tags) r2.push(truncList(r.tags));
+      row.innerHTML =
+        '<div class="r1"><span class="t-badge">' + escapeHtml(badge) + '</span>' +
+        '<span class="fname" title="' + escapeHtml(r.uri) + '">' + escapeHtml(r.file || r.uri) + '</span>' +
+        '<span class="grow"></span><span class="score">' + Number(r.score).toFixed(3) + '</span>' +
+        (r.chunkIndex ? '<span class="chunkpos">第' + r.chunkIndex + '/' + r.chunkCount + '块</span>' : '') + '</div>' +
+        (r2.length ? '<div class="r2">' + r2.join('') + '</div>' : '') +
+        '<div class="r3">' + highlight(r.snippet, q) + '</div>';
+      row.addEventListener('click', () => openDoc(r.project, r.uri, r.snippet));
+      el.appendChild(row);
+    }
+  }
+
+  function truncList(commaList) {
+    const parts = String(commaList).split(',').map(s => s.trim()).filter(Boolean);
+    const shown = parts.slice(0, 2).join(', ');
+    const rest = parts.length - 2;
+    return escapeHtml(shown) + (rest > 0 ? ' <span class="more">+' + rest + '</span>' : '');
+  }
+
+  function highlight(snippet, query) {
+    const safe = escapeHtml(normalizeWs(snippet));
+    const terms = [...new Set(query.split(/\s+/).filter(t => t.length > 1))];
+    if (!terms.length) return safe;
+    const pattern = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    try { return safe.replace(new RegExp('(' + pattern + ')', 'gi'), '<mark>$1</mark>'); }
+    catch { return safe; }
+  }
+
+  document.querySelectorAll('#type-chips .fchip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('#type-chips .fchip').forEach(c => c.classList.remove('on'));
+      chip.classList.add('on');
+      state.typeFilter = chip.dataset.t;
+      if ($('q').value.trim()) runSearch();
+    });
+  });
+  $('q').addEventListener('keydown', e => { if (e.key == 'Enter') runSearch(); });
+  $('search-btn').addEventListener('click', runSearch);
+  $('minscore').addEventListener('input', () => { $('minscore-val').textContent = Number($('minscore').value).toFixed(2); });
+
+  /* ============ 文档抽屉 ============ */
+  const drawerHistory = [];
+  async function openDoc(project, uri, snippet, pushHist = true) {
+    if (pushHist && $('drawer').classList.contains('open')) drawerHistory.push({ project: $('drawer').dataset.project, uri: $('drawer').dataset.uri, snippet: $('drawer').dataset.snippet || '' });
+    $('dr-path').textContent = uri;
+    $('dr-body').innerHTML = '<div class="skel"><div class="l1"></div><div class="l2"></div><div class="l3"></div><div class="l3"></div><div class="l3"></div></div>';
+    $('dr-toc').innerHTML = '';
+    $('dr-type').textContent = '';
+    $('dr-title').textContent = '加载中…';
+    $('dr-kv').innerHTML = '';
+    $('drawer').dataset.project = project; $('drawer').dataset.uri = uri; $('drawer').dataset.snippet = snippet || '';
+    $('dr-head').classList.toggle('hist', drawerHistory.length > 0);
+    $('drawer-mask').classList.add('open');
+    $('drawer').classList.add('open');
+    try {
+      const doc = await api('/api/document?project=' + encodeURIComponent(project) + '&uri=' + encodeURIComponent(uri));
+      const badge = TYPE_LABEL[doc.docType] || doc.docType || '文档';
+      $('dr-type').textContent = badge;
+      $('dr-title').textContent = doc.title || (doc.uri || uri).split(/[\\/]/).pop();
+      const kv = [];
+      if (doc.status) kv.push(escapeHtml(doc.status));
+      if (doc.date) kv.push(escapeHtml(doc.date));
+      if (doc.commit) kv.push(escapeHtml(String(doc.commit).slice(0, 7)));
+      if (doc.modules) kv.push('<span class="mods">' + escapeHtml(doc.modules) + '</span>');
+      if (doc.tags) kv.push(escapeHtml(doc.tags));
+      if (doc.module) kv.push(escapeHtml(doc.module));
+      $('dr-kv').innerHTML = kv.join('');
+      // markdown 渲染
+      $('dr-body').innerHTML = window.marked ? window.marked.parse(doc.text || '', { breaks: false }) : '<pre>' + escapeHtml(doc.text || '') + '</pre>';
+      wireDocLinks(project);
+      buildToc();
+      locateHit(snippet);
+    } catch (err) {
+      $('dr-body').innerHTML = '<div class="empty" style="margin:40px 0 0"><div class="box"><div class="t1">无法加载文档</div><div class="t2">' + escapeHtml(err.message) + '</div></div></div>';
+      $('dr-title').textContent = '';
+    }
+  }
+
+  /* 相对 .md 链接 → 同项目文档跳转 */
+  function wireDocLinks(project) {
+    $('dr-body').querySelectorAll('a[href]').forEach(a => {
+      const href = a.getAttribute('href');
+      if (!href || /^(https?:|#|mailto:)/.test(href)) { if (/^https?:/.test(href)) a.target = '_blank'; return; }
+      a.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const base = $('drawer').dataset.uri;
+        const dir = base.slice(0, Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\')));
+        const resolved = new URL('file:///' + dir.replace(/\\/g, '/') + '/' + href.replace(/^\.\//, '')).pathname.replace(/^\/+/, '');
+        const abs = decodeURIComponent(resolved).replace(/\//g, '\\');
+        openDoc(project, abs, '');
+      });
+    });
+  }
+
+  function buildToc() {
+    const heads = [...$('dr-body').querySelectorAll('h2')].slice(0, 10);
+    $('dr-toc').innerHTML = heads.map((h, i) => '<a data-i="' + i + '">' + escapeHtml(h.textContent) + '</a>').join('');
+    $('dr-toc').querySelectorAll('a').forEach(a => {
+      a.addEventListener('click', () => heads[Number(a.dataset.i)].scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    });
+  }
+
+  /* 命中块定位：markdown 语法符号会被渲染消费、snippet 可能跨块——
+     先剥离符号再归一化，按长度递减多次尝试匹配渲染后的块级元素。 */
+  function stripMd(s) { return String(s ?? '').replace(/[#>*`_~|]+/g, ' ').replace(/\s+/g, ' ').trim(); }
+  function locateHit(snippet) {
+    const stripped = stripMd(normalizeWs(snippet));
+    if (!stripped) return;
+    const mid = Math.floor(stripped.length / 2);
+    const probes = [stripped.slice(0, 60), stripped.slice(0, 32), stripped.slice(Math.max(0, mid - 16), mid + 16)]
+      .filter((p) => p.length >= 8);
+    const blocks = $('dr-body').querySelectorAll('p, li, pre, h1, h2, h3, blockquote, td');
+    for (const probe of probes) {
+      for (const block of blocks) {
+        if (stripMd(block.textContent).includes(probe)) {
+          const wrap = document.createElement('div');
+          wrap.className = 'hit-block';
+          block.parentNode.insertBefore(wrap, block);
+          wrap.appendChild(block);
+          setTimeout(() => wrap.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+          return;
+        }
+      }
+    }
+  }
+
+  $('dr-back').addEventListener('click', () => {
+    const prev = drawerHistory.pop();
+    if (prev) openDoc(prev.project, prev.uri, prev.snippet, false);
+    $('dr-head').classList.toggle('hist', drawerHistory.length > 0);
+  });
+  function closeDrawer() {
+    $('drawer-mask').classList.remove('open');
+    $('drawer').classList.remove('open');
+    drawerHistory.length = 0;
+    $('dr-head').classList.remove('hist');
+  }
+  $('dr-close').addEventListener('click', closeDrawer);
+  $('drawer-mask').addEventListener('click', closeDrawer);
+
+  /* ============ 导入 ============ */
+  async function openImport() {
+    $('imp-path').value = '';
+    $('imp-name').value = '';
+    try {
+      const picked = await api('/api/system/pick-folder');
+      if (picked.path) {
+        $('imp-path').value = picked.path;
+        $('imp-name').value = picked.path.split(/[\\/]/).filter(Boolean).pop() || '';
+      }
+    } catch (err) {
+      if (err.status != 501 && err.status != 500) { toast('打开文件夹选择器失败：' + err.message, true); return; }
+      toast('无法打开系统选择器，请手动输入路径', true);
     }
     $('import-modal').classList.add('open');
+  }
+  $('imp-browse').addEventListener('click', async () => {
+    try {
+      const picked = await api('/api/system/pick-folder');
+      if (picked.path) {
+        $('imp-path').value = picked.path;
+        $('imp-name').value = picked.path.split(/[\\/]/).filter(Boolean).pop() || '';
+      }
+    } catch (err) { toast('选择器不可用：' + err.message, true); }
   });
-
-  $('imp-source').addEventListener('input', () => {
-    const seg = $('imp-source').value.split(/[\\/]/).filter(Boolean).pop() || '';
+  $('imp-path').addEventListener('input', () => {
+    const seg = $('imp-path').value.split(/[\\/]/).filter(Boolean).pop() || '';
     if (seg) $('imp-name').value = seg;
   });
-
   $('import-cancel').addEventListener('click', () => $('import-modal').classList.remove('open'));
   $('import-confirm').addEventListener('click', async () => {
-    const source = $('imp-source').value.trim();
-    if (!source) { $('import-error').textContent = '请填写或选择源文件夹路径。'; return; }
+    const source = $('imp-path').value.trim();
+    if (!source) { toast('请填写或选择源文件夹路径', true); return; }
     $('import-confirm').disabled = true;
-    $('import-error').textContent = '导入中（首次需要向量化，可能耗时）…';
+    $('import-confirm').textContent = '导入中（首次需向量化，可能耗时）…';
     try {
       const data = await api('/api/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sourceDir: source,
-          projectName: $('imp-name').value.trim() || undefined,
-          watch: $('imp-watch').checked,
-        }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceDir: source, projectName: $('imp-name').value.trim() || undefined, watch: $('imp-watch').checked }),
       });
       $('import-modal').classList.remove('open');
       state.selected.add(data.project);
+      toast('已导入 "' + data.project + '"（' + data.filesTracked + ' 个文件被索引）');
       await loadProjects();
-      $('status').textContent = '已导入 "' + data.project + '"（' + data.filesTracked + ' 个文件被索引）';
     } catch (err) {
-      $('import-error').textContent = '导入失败：' + err.message;
+      toast('导入失败：' + err.message, true);
     } finally {
       $('import-confirm').disabled = false;
+      $('import-confirm').textContent = '导入';
     }
   });
 
-  // ---------- wiring ----------
-  $('minscore').addEventListener('input', () => {
-    $('minscore-val').textContent = Number($('minscore').value).toFixed(2);
-  });
-  $('search-btn').addEventListener('click', doSearch);
-  $('query').addEventListener('keydown', (e) => { if (e.key == 'Enter') doSearch(); });
+  /* ============ 设置 ============ */
+  let extChips = [];
+  function renderExtChips() {
+    $('ext-chips').innerHTML = extChips.map((e, i) =>
+      '<span class="ext">' + escapeHtml(e) + '<button class="ext-x" data-i="' + i + '">×</button></span>').join('') +
+      '<button class="ext-add" id="ext-add">+ 添加</button>';
+    $('ext-chips').querySelectorAll('.ext-x').forEach(b => b.addEventListener('click', () => { extChips.splice(Number(b.dataset.i), 1); renderExtChips(); }));
+    $('ext-add').addEventListener('click', () => {
+      const ext = prompt('输入扩展名（如 .pdf）');
+      if (!ext) return;
+      extChips.push(ext.replace(/^\.?/, '.').toLowerCase());
+      renderExtChips();
+    });
+  }
 
-  loadProjects();
+  $('settings-btn').addEventListener('click', async () => {
+    try {
+      const s = await api('/api/settings');
+      state.configured = s.configured;
+      $('set-provider').value = s.settings?.provider || 'minimax';
+      $('set-apikey').value = s.settings?.apiKey || '';
+      $('set-apikey-note').textContent = s.configured ? '已保存的 key 只显示尾 4 位，留原值提交表示不修改' : '尚未配置';
+      $('set-model').value = s.settings?.model || '';
+      $('set-endpoint').value = s.settings?.endpoint || '';
+      $('set-root').value = s.settings?.rootPath || '';
+      $('svc-url').textContent = location.host;
+      extChips = (s.settings?.extensions || ['.md', '.txt', '.html']).slice();
+      renderExtChips();
+      $('set-debounce').value = s.settings?.debounceMs ?? 500;
+      $('endpoint-field').style.display = $('set-provider').value == 'openai' ? '' : 'none';
+      $('settings-modal').classList.add('open');
+    } catch (err) { toast('读取设置失败：' + err.message, true); }
+  });
+  $('set-provider').addEventListener('change', () => {
+    $('endpoint-field').style.display = $('set-provider').value == 'openai' ? '' : 'none';
+  });
+  $('set-root-browse').addEventListener('click', async () => {
+    try {
+      const picked = await api('/api/system/pick-folder');
+      if (picked.path) $('set-root').value = picked.path;
+    } catch (err) { toast('选择器不可用：' + err.message, true); }
+  });
+  $('settings-cancel').addEventListener('click', () => $('settings-modal').classList.remove('open'));
+  $('settings-save').addEventListener('click', async () => {
+    const key = $('set-apikey').value.trim();
+    if (!key) { toast('请填写 API Key（已配置且不变时可保留掩码值）', true); return; }
+    $('settings-save').disabled = true;
+    try {
+      const res = await api('/api/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: $('set-provider').value,
+          apiKey: key,
+          model: $('set-model').value.trim() || undefined,
+          endpoint: $('set-endpoint').value.trim() || undefined,
+          rootPath: $('set-root').value.trim() || undefined,
+          extensions: extChips,
+          debounceMs: Number($('set-debounce').value) || 500,
+        }),
+      });
+      $('settings-modal').classList.remove('open');
+      state.configured = true;
+      updateConfiguredUi();
+      await refreshHealth();
+      await loadProjects();
+      if (res.rebuildTriggered) { pollRebuild(); toast('模型已切换，正在重建索引'); }
+      else toast('设置已保存');
+    } catch (err) {
+      toast('保存失败：' + err.message, true);
+    } finally {
+      $('settings-save').disabled = false;
+    }
+  });
+
+  document.querySelectorAll('.modal-mask').forEach(m => m.addEventListener('click', e => { if (e.target == m) m.classList.remove('open'); }));
+  document.addEventListener('keydown', e => {
+    if (e.key == 'Escape') {
+      closeDrawer();
+      document.querySelectorAll('.modal-mask.open').forEach(m => m.classList.remove('open'));
+    }
+  });
+
+  /* ============ 启动 ============ */
+  (async function init() {
+    try {
+      const s = await api('/api/settings');
+      state.configured = s.configured;
+      if (s.configured) state.modelSub = s.settings.model || (s.settings.provider == 'minimax' ? 'embo-01' : '');
+    } catch { /* server down; foot shows */ }
+    updateConfiguredUi();
+    await loadProjects();
+    refreshHealth();
+  })();
 })();
 </script>
 </body>

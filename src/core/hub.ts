@@ -234,6 +234,23 @@ export class VectorHub {
                             ? { docType: { $in: opts.docTypes } }
                             : undefined,
                     })
+                    .catch(async (err: unknown) => {
+                        // BM25 needs a minimum corpus size ("collection is too
+                        // small for consolidation"). Tiny projects fail hybrid
+                        // queries — degrade that project to pure semantic
+                        // instead of dropping it from the results.
+                        const message = err instanceof Error ? err.message : String(err);
+                        if (opts.isBm25 && message.includes('too small')) {
+                            return await index.queryDocuments(query, {
+                                maxDocuments: opts.maxDocuments,
+                                maxChunks: opts.maxChunks,
+                                filter: opts.docTypes && opts.docTypes.length > 0
+                                    ? { docType: { $in: opts.docTypes } }
+                                    : undefined,
+                            });
+                        }
+                        throw err;
+                    })
                     .then((results) => ({ name, index, results })),
             ),
         );
