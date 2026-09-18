@@ -1,0 +1,493 @@
+import { pathUtils as path } from './utils/pathUtils';
+import { v4 } from 'uuid';
+import { GPT3Tokenizer } from "./GPT3Tokenizer";
+import { CreateIndexConfig, LocalIndex } from "./LocalIndex";
+import { TextSplitter, TextSplitterConfig } from "./TextSplitter";
+import { MetadataFilter, EmbeddingsModel, Tokenizer, MetadataTypes, EmbeddingsResponse, QueryResult, DocumentChunkMetadata, DocumentCatalogStats } from "./types";
+import { LocalDocumentResult } from './LocalDocumentResult';
+import { LocalDocument } from './LocalDocument';
+import { FileStorage } from './storage';
+import { DocumentCatalog, IndexCodec, JsonCodec } from './codecs';
+import { computeContentHash } from './internals/contentHash';
+
+/**
+ * Options for querying documents in the index.
+ */
+export interface DocumentQueryOptions {
+    /**
+     * Optional. Maximum number of documents to return.
+     * @remarks
+     * Default is 10.
+     */
+    maxDocuments?: number;
+    /**
+     * Maximum number of chunks to return per document.
+     * @remarks
+     * Default is 50.
+     */
+    maxChunks?: number;
+    /**
+     * Optional. Filter to apply to the document metadata.
+     */
+    filter?: MetadataFilter;
+    /**
+     * Optional. Turn on bm25 keyword search to perform hybrid search - semantic + keyword
+     */
+    isBm25?: boolean;
+}
+
+/**
+ * Configuration settings for a local document index.
+ */
+export interface LocalDocumentIndexConfig {
+    /**
+     * Folder path where the index is stored.
+     */
+    folderPath: string;
+    /**
+     * Optional. Name of the index file. Defaults to 'index.json'.
+     */
+    indexName?: string;
+
+    /**
+     * Optional. Embeddings model to use for generating document embeddings.
+     */
+    embeddings?: EmbeddingsModel;
+    /**
+     * Optional. Tokenizer to use for splitting text into tokens.
+     */
+    tokenizer?: Tokenizer;
+    /**
+     * Optional. Configuration settings for splitting text into chunks.
+     */
+    chunkingConfig?: Partial<TextSplitterConfig>;
+    /**
+     * Optional. File storage plugin to use for storing index files.
+     * @remarks
+     * If not specified, the LocalFileStorageClass will be used.
+     */
+    storage?: FileStorage;
+
+    /**
+     * Optional. Codec for serialization format.
+     * @remarks
+     * If not specified, the JsonCodec will be used (backward-compatible).
+     */
+    codec?: IndexCodec;
+}
+
+/**
+ * Represents a local index of documents stored on disk.
+ */
+export class LocalDocumentIndex extends LocalIndex<DocumentChunkMetadata> {
+    private readonly _embeddings?: EmbeddingsModel;
+    private readonly _tokenizer: Tokenizer;
+    private readonly _chunkingConfig?: TextSplitterConfig;
+    private _catalog?: DocumentCatalog;
+    private _newCatalog?: DocumentCatalog;
+
+    /**
+     * Creates a new `LocalDocumentIndex` instance.
+     * @param config Configuration settings for the document index.
+     */
+    public constructor(config: LocalDocumentIndexConfig) {
+        super(config.folderPath, config.indexName, config.storage, config.codec);
+        this._embeddings = config.embeddings;
+        this._chunkingConfig = Object.assign({
+            keepSeparators: true,
+            chunkSize: 512,
+            chunkOverlap: 0,
+        } as TextSplitterConfig, config.chunkingConfig);
+        this._tokenizer = config.tokenizer ?? this._chunkingConfig.tokenizer ?? new GPT3Tokenizer();
+        this._chunkingConfig.tokenizer = this._tokenizer;
+    }
+
+    /**
+     * Returns the embeddings model used by the index (if configured.)
+     */
+    public get embeddings(): EmbeddingsModel | undefined {
+        return this._embeddings;
+    }
+
+    /**
+     * Returns the tokenizer used by the index.
+     */
+    public get tokenizer(): Tokenizer {
+        return this._tokenizer;
+    }
+
+    /**
+     * Returns true if the document catalog exists.
+     */
+    /** Name of the catalog file (derived from codec extension). */
+    private get _catalogName(): string {
+        return `catalog${this.codec.extension}`;
+    }
+
+    public async isCatalogCreated(): Promise<boolean> {
+      return this.storage.pathExists(path.join(this.folderPath, this._catalogName));
+    }
+
+    /**
+     * Returns the document ID for the given URI.
+     * @param uri URI of the document to lookup.
+     * @returns Document ID or undefined if not found.
+     */
+    public async getDocumentId(uri: string): Promise<string | undefined> {
+        await this.loadIndexData();
+        return this._catalog?.uriToId[uri];
+    }
+
+    /**
+     * Returns the document URI for the given ID.
+     * @param documentId ID of the document to lookup.
+     * @returns Document URI or undefined if not found.
+     */
+    public async getDocumentUri(documentId: string): Promise<string | undefined> {
+        await this.loadIndexData();
+        return this._catalog?.idToUri[documentId];
+    }
+
+    /**
+     * Loads the document catalog from disk and returns its stats.
+     * @returns Catalog stats.
+     */
+    public async getCatalogStats(): Promise<DocumentCatalogStats> {
+        const stats = await this.getIndexStats()
+        return {
+            version: this._catalog!.version,
+            documents: this._catalog!.count,
+            chunks: stats.items,
+            metadata_config: stats.metadata_config
+        };
+    }
+
+    /**
+     * Deletes a document from the index.
+     * @param uri URI of the document to delete.
+     */
+    public async deleteDocument(uri: string): Promise<void> {
+        // Lookup document ID
+        const documentId = await this.getDocumentId(uri);
+        if (documentId == undefined) {
+            return;
+        }
+
+        // Delete document chunks from index and remove from catalog
+        await this.beginUpdate();
+        try {
+            // Get list of chunks for document and delete in a single pass.
+            const chunks = await this.listItemsByMetadata({ documentId });
+            await this.deleteItems(chunks.map(c => c.id));
+            // Remove entry from catalog
+            delete this._newCatalog!.uriToId[uri];
+            delete this._newCatalog!.idToUri[documentId];
+            if (this._newCatalog!.uriToHash) {
+                delete this._newCatalog!.uriToHash[uri];
+            }
+            this._newCatalog!.count--;
+            // Commit changes
+            await this.endUpdate();
+        } catch (err: unknown) {
+            // Cancel update and raise error
+            this.cancelUpdate();
+            throw new Error(`Error deleting document "${uri}": ${(err as any).toString()}`);
+        }
+
+        // Delete text file from disk
+        try {
+            await this.storage.deleteFile(path.join(this.folderPath, `${documentId}.txt`));
+        } catch (err: unknown) {
+            throw new Error(`Error removing text file for document "${uri}" from disk: ${(err as any).toString()}`);
+        }
+
+        // Delete metadata file from disk
+        try {
+            await this.storage.deleteFile(path.join(this.folderPath, `${documentId}${this.codec.extension}`));
+        } catch (err: unknown) {
+            // Ignore error
+        }
+    }
+
+    /**
+     * Adds a document to the catalog.
+     * @remarks
+     * A new update is started if one is not already in progress. If a document with the same uri
+     * already exists, it will be replaced — unless its stored content hash matches the new content,
+     * in which case the call is a no-op and the existing document handle is returned. Pass
+     * `options.force = true` to bypass the hash check and force a re-embed (useful after rotating
+     * the embeddings model).
+     * @param uri - Document URI
+     * @param text - Document text
+     * @param docType - Optional. Document type
+     * @param metadata - Optional. Document metadata to index
+     * @param options - Optional. `force: true` skips the skip-if-unchanged check.
+     * @returns Inserted document
+     */
+    public async upsertDocument(uri: string, text: string, docType?: string, metadata?: Record<string, MetadataTypes>, options?: { force?: boolean }): Promise<LocalDocument> {
+        // Ensure embeddings configured
+        if (!this._embeddings) {
+            throw new Error(`Embeddings model not configured.`);
+        }
+
+        // Compute hash of the inputs that determine the stored chunks/vectors.
+        const newHash = computeContentHash(text, docType, metadata);
+
+        // Check for existing document ID
+        let documentId = await this.getDocumentId(uri);
+        if (documentId != undefined) {
+            // Short-circuit: if content + metadata is unchanged, skip the
+            // expensive re-embed and return a handle to the existing document.
+            if (!options?.force) {
+                const existingHash = this._catalog?.uriToHash?.[uri];
+                if (existingHash === newHash) {
+                    return new LocalDocument(this, documentId, uri);
+                }
+            }
+            // Delete existing document
+            await this.deleteDocument(uri);
+        } else {
+            // Generate new document ID
+            documentId = v4();
+        }
+
+        // Initialize text splitter settings
+        const config = Object.assign({ docType }, this._chunkingConfig);
+        if (config.docType == undefined) {
+            // Populate docType based on extension
+            const pos = uri.lastIndexOf('.');
+            if (pos >= 0) {
+                const ext = uri.substring(pos + 1).toLowerCase();
+                config.docType = ext;
+            }
+        }
+
+        // Split text into chunks
+        const splitter = new TextSplitter(config);
+        const chunks = splitter.split(text);
+
+        // Break chunks into batches for embedding generation
+        let totalTokens = 0;
+        const chunkBatches: string[][] = [];
+        let currentBatch: string[] = [];
+        for (const chunk of chunks) {
+            totalTokens += chunk.tokens.length;
+            if (totalTokens > this._embeddings.maxTokens) {
+                chunkBatches.push(currentBatch);
+                currentBatch = [];
+                totalTokens = chunk.tokens.length;
+            }
+            currentBatch.push(chunk.text.replace(/\n/g, ' '));
+        }
+        if (currentBatch.length > 0) {
+            chunkBatches.push(currentBatch);
+        }
+
+        // Generate embeddings for chunks
+        const embeddings: number[][] = [];
+        for (const batch of chunkBatches) {
+            let response: EmbeddingsResponse;
+            try {
+                response = await this._embeddings.createEmbeddings(batch);
+            } catch (err: unknown) {
+                throw new Error(`Error generating embeddings: ${(err as any).toString()}`);
+            }
+
+            // Check for error
+            if (response.status != 'success') {
+                throw new Error(`Error generating embeddings: ${response.message}`);
+            }
+
+            // Add embeddings to output
+            for (const embedding of response.output!) {
+                embeddings.push(embedding);
+            }
+        }
+
+        // Add document chunks to index
+        await this.beginUpdate();
+        try {
+            // Add chunks to index
+            for (let i = 0; i < chunks.length; i++) {
+                const chunk = chunks[i];
+                const embedding = embeddings[i];
+                const chunkMetadata: DocumentChunkMetadata = Object.assign({
+                    documentId,
+                    startPos: chunk.startPos,
+                    endPos: chunk.endPos,
+                }, metadata);
+                await this.insertItem({
+                    id: v4(),
+                    metadata: chunkMetadata,
+                    vector: embedding,
+                });
+            }
+
+            // Save metadata file to disk
+            if (metadata != undefined) {
+                await this.storage.upsertFile(path.join(this.folderPath, `${documentId}${this.codec.extension}`), this.codec.serializeMetadata(metadata));
+            }
+
+            // Save text file to disk
+            await this.storage.upsertFile(path.join(this.folderPath, `${documentId}.txt`), text);
+
+            // Add entry to catalog
+            this._newCatalog!.uriToId[uri] = documentId;
+            this._newCatalog!.idToUri[documentId] = uri;
+            this._newCatalog!.uriToHash = this._newCatalog!.uriToHash ?? {};
+            this._newCatalog!.uriToHash[uri] = newHash;
+            this._newCatalog!.count++;
+
+            // Commit changes
+            await this.endUpdate();
+        } catch (err: unknown) {
+            // Cancel update and raise error
+            this.cancelUpdate();
+            throw new Error(`Error adding document "${uri}": ${(err as any).toString()}`);
+        }
+
+        // Return document
+        return new LocalDocument(this, documentId, uri);
+    }
+
+    /**
+     * Returns all documents in the index.
+     * @remarks
+     * Each document will contain all of the documents indexed chunks.
+     * @returns Array of documents.
+     */
+    public async listDocuments(): Promise<LocalDocumentResult[]> {
+        // Sort chunks by document ID
+        const docs: { [documentId: string]: QueryResult<DocumentChunkMetadata>[]; } = {};
+        const chunks = await this.listItems();
+        chunks.forEach(chunk => {
+            const metadata = chunk.metadata;
+            if (docs[metadata.documentId] == undefined) {
+                docs[metadata.documentId] = [];
+            }
+            docs[metadata.documentId].push({ item: chunk, score: 1.0 });
+        });
+
+        // Create document results
+        const results: LocalDocumentResult[] = [];
+        for (const documentId in docs) {
+            const uri = await this.getDocumentUri(documentId) as string;
+            const documentResult = new LocalDocumentResult(this, documentId, uri, docs[documentId], this._tokenizer);
+            results.push(documentResult);
+        }
+
+        return results;
+    }
+
+    /**
+     * Queries the index for documents similar to the given query.
+     * @param query Text to query for.
+     * @param options Optional. Query options.
+     * @returns Array of document results.
+     */
+    public async queryDocuments(query: string, options?: DocumentQueryOptions): Promise<LocalDocumentResult[]> {
+        // Ensure embeddings configured
+        if (!this._embeddings) {
+            throw new Error(`Embeddings model not configured.`);
+        }
+
+        // Ensure options are defined
+        options = Object.assign({
+            maxDocuments: 10,
+            maxChunks: 50,
+        }, options);
+
+        // Generate embeddings for query
+        let embeddings: EmbeddingsResponse;
+        try {
+            embeddings = await this._embeddings.createEmbeddings(query.replace(/\n/g, ' '));
+        } catch (err: unknown) {
+            throw new Error(`Error generating embeddings for query: ${(err as any).toString()}`);
+        }
+
+        // Check for error
+        if (embeddings.status != 'success') {
+            throw new Error(`Error generating embeddings for query: ${embeddings.message}`);
+        }
+
+        // Query index for chunks
+        const results = await this.queryItems(embeddings.output![0], query, options.maxChunks!, options.filter, options.isBm25);
+
+        // Group chunks by document
+        const documentChunks: { [documentId: string]: QueryResult<DocumentChunkMetadata>[]; } = {};
+        for (const result of results) {
+            const metadata = result.item.metadata;
+            if (documentChunks[metadata.documentId] == undefined) {
+                documentChunks[metadata.documentId] = [];
+            }
+            documentChunks[metadata.documentId].push(result);
+        }
+
+        // Create a document result for each document
+        const documentResults: LocalDocumentResult[] = [];
+        for (const documentId in documentChunks) {
+            const chunks = documentChunks[documentId];
+            const uri = await this.getDocumentUri(documentId) as string;
+            const documentResult = new LocalDocumentResult(this, documentId, uri, chunks, this._tokenizer);
+            documentResults.push(documentResult);
+        }
+
+        // Sort document results by score and return top results
+        return documentResults.sort((a, b) => b.score - a.score).slice(0, options.maxDocuments!);
+    }
+
+    // Overrides
+    public async beginUpdate(): Promise<void> {
+        await super.beginUpdate();
+        this._newCatalog = Object.assign({}, this._catalog);
+    }
+
+    public cancelUpdate(): void {
+        super.cancelUpdate();
+        this._newCatalog = undefined;
+    }
+
+    public async createIndex(config?: CreateIndexConfig): Promise<void> {
+        await super.createIndex(config);
+        await this.loadIndexData();
+    }
+
+    public async endUpdate(): Promise<void> {
+        await super.endUpdate();
+        try {
+            // Save catalog
+            await this.storage.upsertFile(path.join(this.folderPath, this._catalogName), this.codec.serializeCatalog(this._newCatalog!));
+            this._catalog = this._newCatalog;
+            this._newCatalog = undefined;
+        } catch (err: unknown) {
+            throw new Error(`Error saving document catalog: ${(err as any).toString()}`);
+        }
+    }
+
+    protected async loadIndexData(): Promise<void> {
+        await super.loadIndexData();
+        if (this._catalog) {
+            return;
+        }
+
+        const catalogPath = path.join(this.folderPath, this._catalogName);
+        if (await this.isCatalogCreated()) {
+            // Load catalog
+            const buffer = await this.storage.readFile(catalogPath);
+            this._catalog = this.codec.deserializeCatalog(buffer);
+        } else {
+            try {
+                // Initialize catalog
+                this._catalog = {
+                    version: 1,
+                    count: 0,
+                    uriToId: {},
+                    idToUri: {},
+                };
+                await this.storage.upsertFile(catalogPath, this.codec.serializeCatalog(this._catalog));
+            } catch(err: unknown) {
+                throw new Error(`Error creating document catalog: ${(err as any).toString()}`);
+            }
+        }
+    }
+}
