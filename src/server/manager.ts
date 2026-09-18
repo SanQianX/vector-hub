@@ -443,7 +443,9 @@ function bowEmbed(text: string): number[] {
         }
         vector[hash % 64] += 1;
     }
-    if (vector.every((v) => v == 0)) {
+    // reduce (not every()) — a narrowable every() would type the array as 0[]
+    // and reject the fallback assignment below.
+    if (vector.reduce((a, b) => a + b, 0) == 0) {
         // Token-less text still needs a non-zero vector to keep cosine defined.
         vector[0] = 1;
     }
