@@ -65,6 +65,12 @@ export interface SearchOptions {
     maxChunks?: number;
 
     /**
+     * Restrict results to these document types (goal / architecture /
+     * change / module / index …). Applied as a chunk-metadata filter.
+     */
+    docTypes?: string[];
+
+    /**
      * Drop results scoring below this cosine similarity. Default 0.
      */
     minScore?: number;
@@ -86,12 +92,27 @@ export interface SearchOptions {
 export interface SearchResultItem {
     /** Project (sub-folder) the document belongs to. */
     project: string;
-    /** Document URI. */
+    /** Document URI (absolute source path for synced folders). */
     uri: string;
     /** Cosine similarity (or hybrid score when `isBm25` is on). */
     score: number;
     /** Leading text snippet of the best-matching section. */
     snippet: string;
+    /** Document type from kb-sync metadata (goal/change/module/…), when present. */
+    docType?: string;
+    /** Comma-joined frontmatter tags, when present. */
+    tags?: string;
+    /** Comma-joined affectedModules, when present. */
+    modules?: string;
+    /** 1-based position of the best-matching chunk within the document. */
+    chunkIndex?: number;
+    /** Total chunks in the document. */
+    chunkCount?: number;
+    /** Short file name for display. */
+    file?: string;
+    /** Best-matching chunk's character span in the indexed body text. */
+    startPos?: number;
+    endPos?: number;
 }
 
 /**

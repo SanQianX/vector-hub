@@ -224,8 +224,11 @@ export class VectorHub {
                         maxDocuments: opts.maxDocuments,
                         maxChunks: opts.maxChunks,
                         isBm25: opts.isBm25,
+                        filter: opts.docTypes && opts.docTypes.length > 0
+                            ? { docType: { $in: opts.docTypes } }
+                            : undefined,
                     })
-                    .then((results) => ({ name, results })),
+                    .then((results) => ({ name, index, results })),
             ),
         );
 
@@ -240,9 +243,9 @@ export class VectorHub {
                 });
                 continue;
             }
-            const { name, results } = outcome.value;
+            const { name, index, results } = outcome.value;
             for (const result of results) {
-                items.push(await this._toResultItem(name, result, opts.snippetTokens));
+                items.push(await this._toResultItem(name, index, result, opts.snippetTokens));
             }
         }
 
@@ -355,6 +358,7 @@ export class VectorHub {
 
     private async _toResultItem(
         project: string,
+        index: LocalDocumentIndex,
         result: LocalDocumentResult,
         snippetTokens: number,
     ): Promise<SearchResultItem> {
@@ -366,6 +370,42 @@ export class VectorHub {
         } catch {
             // Snippet is best-effort; score and uri are still useful.
         }
-        return { project, uri: result.uri, score: result.score, snippet };
+
+        const item: SearchResultItem = {
+            project,
+            uri: result.uri,
+            score: result.score,
+            snippet,
+            file: result.uri.split(/[\\/]/).pop() ?? result.uri,
+        };
+
+        try {
+            // Best-matching chunk (highest score) carries the kb-sync metadata;
+            // its document-wide position needs the full chunk list of the doc.
+            const chunks = [...result.chunks].sort((a, b) => b.score - a.score);
+            const best = chunks[0];
+            if (best) {
+                const metadata = best.item.metadata as Record<string, unknown>;
+                if (typeof metadata.docType == 'string') item.docType = metadata.docType;
+                if (typeof metadata.tags == 'string') item.tags = metadata.tags;
+                if (typeof metadata.modules == 'string') item.modules = metadata.modules;
+                item.startPos = best.item.metadata.startPos;
+                item.endPos = best.item.metadata.endPos;
+
+                const documentId = best.item.metadata.documentId;
+                const all = await index.listItemsByMetadata({ documentId });
+                const sorted = all
+                    .map((entry) => entry.metadata.startPos)
+                    .sort((a, b) => a - b);
+                const position = sorted.indexOf(best.item.metadata.startPos);
+                if (position >= 0) {
+                    item.chunkIndex = position + 1;
+                    item.chunkCount = sorted.length;
+                }
+            }
+        } catch {
+            // Metadata enrichment is best-effort.
+        }
+        return item;
     }
 }

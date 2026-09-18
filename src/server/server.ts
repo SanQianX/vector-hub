@@ -3,6 +3,8 @@ import http from 'node:http';
 import path from 'node:path';
 import type { HubManager, HubSettings } from './manager';
 import { pickFolder } from './folder-picker';
+import { extractMetadata, inferDocType, parseFrontmatter } from '../core/kb-sync';
+import { LocalDocument } from 'vectra';
 
 /**
  * Options for `createServer`.
@@ -62,14 +64,29 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                         return sendJson(res, 400, { error: "Missing required query parameter 'q'." });
                     }
                     const projects = url.searchParams.get('projects')?.split(',').map((p) => p.trim()).filter(Boolean);
+                    const docTypes = url.searchParams.get('docTypes')?.split(',').map((t) => t.trim()).filter(Boolean);
                     const response = await hub.search(query, {
                         projects,
+                        docTypes,
                         maxResults: parseNumber(url.searchParams.get('maxResults')),
                         maxDocuments: parseNumber(url.searchParams.get('maxDocuments')),
                         minScore: parseNumber(url.searchParams.get('minScore')),
                         isBm25: url.searchParams.get('isBm25') == 'true',
                     });
                     return sendJson(res, 200, response);
+                }
+
+                case 'GET /api/document': {
+                    const project = url.searchParams.get('project');
+                    const uri = url.searchParams.get('uri');
+                    if (!project || !uri) {
+                        return sendJson(res, 400, { error: "Missing required query parameters 'project' and 'uri'." });
+                    }
+                    const document = await readDocument(manager, project, uri);
+                    if (!document) {
+                        return sendJson(res, 404, { error: 'Document not found in the project index or on disk.' });
+                    }
+                    return sendJson(res, 200, document);
                 }
 
                 case 'POST /api/documents': {
@@ -107,8 +124,14 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                     return sendJson(res, 200, {
                         configured: settings != undefined,
                         settings: settings
-                            ? { ...settings, apiKey: maskApiKey(settings.apiKey) }
-                            : undefined,
+                            ? {
+                                ...settings,
+                                apiKey: maskApiKey(settings.apiKey),
+                                rootPath: manager.hub.rootPath,
+                                extensions: manager.extensions,
+                                debounceMs: manager.debounceMs,
+                            }
+                            : { rootPath: manager.hub.rootPath, extensions: manager.extensions, debounceMs: manager.debounceMs },
                     });
                 }
 
@@ -129,6 +152,13 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                         apiKey,
                         model: typeof body.model == 'string' ? body.model : undefined,
                         endpoint: typeof body.endpoint == 'string' ? body.endpoint : undefined,
+                        rootPath: typeof body.rootPath == 'string' && body.rootPath.trim().length > 0
+                            ? body.rootPath
+                            : manager.hub.rootPath,
+                        extensions: Array.isArray(body.extensions)
+                            ? body.extensions.filter((e): e is string => typeof e == 'string' && e.trim().length > 0)
+                            : manager.extensions,
+                        debounceMs: parseFiniteNumber(body.debounceMs) ?? manager.debounceMs,
                     });
                     return sendJson(res, 200, { ok: true, rebuildTriggered: rebuild != undefined });
                 }
@@ -231,6 +261,63 @@ function parseNumber(value: string | null): number | undefined {
     }
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseFiniteNumber(value: unknown): number | undefined {
+    return typeof value == 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Loads a document for the viewer drawer: prefers the live source file
+ * (only when the uri lies under the project's registered source folder —
+ * this is an arbitrary-file-read guard), falls back to the indexed copy.
+ * Returns frontmatter-derived metadata alongside the body text.
+ */
+async function readDocument(
+    manager: HubManager,
+    project: string,
+    uri: string,
+): Promise<Record<string, unknown> | null> {
+    const registration = manager.registrations[project];
+    let text: string | null = null;
+    let sourceExists = false;
+
+    if (registration?.sourceDir) {
+        const root = path.resolve(registration.sourceDir);
+        const target = path.resolve(uri);
+        if (target.startsWith(root + path.sep) || target == root) {
+            try {
+                text = await fs.promises.readFile(target, 'utf8');
+                sourceExists = true;
+            } catch {
+                // Source file gone — fall through to the indexed copy.
+            }
+        }
+    }
+    if (text == null) {
+        try {
+            const index = manager.hub.getProjectIndex(project);
+            const documentId = await index.getDocumentId(uri);
+            if (documentId) {
+                text = await new LocalDocument(index, documentId, uri).loadText();
+            }
+        } catch {
+            // Not indexed either.
+        }
+    }
+    if (text == null) {
+        return null;
+    }
+
+    const parsed = parseFrontmatter(text);
+    const metadata = extractMetadata(inferDocType(uri, registration?.sourceDir ?? path.dirname(uri)), parsed.meta);
+    return {
+        uri,
+        text: parsed.body,
+        frontmatterLength: parsed.frontmatterLength,
+        sourceExists,
+        ...metadata,
+    };
 }
 
 function isLoopbackOrigin(req: http.IncomingMessage): boolean {

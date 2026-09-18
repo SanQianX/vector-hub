@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { LocalDocumentIndex, VirtualFileStorage } from 'vectra';
+import { VectorHub } from '../src/core/hub';
 import type { EmbeddingsModel, EmbeddingsResponse } from 'vectra';
 import {
     buildDocument,
@@ -191,6 +192,59 @@ describe('kb-sync: syncSourceFolder', () => {
         await index.createIndex({ version: 1 });
         const result = await syncSourceFolder(index, sourceDir);
         assert.strictEqual(result.filesTracked, 3); // png not counted
+    });
+});
+
+describe('kb-sync: search integration (docTypes filter + metadata enrichment)', () => {
+    let sourceDir: string;
+    let root: string;
+    let hub: VectorHub;
+
+    beforeEach(async () => {
+        sourceDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'kb-int-src-'));
+        root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'kb-int-root-'));
+        await fs.promises.mkdir(path.join(sourceDir, 'changes'), { recursive: true });
+
+        await fs.promises.writeFile(
+            path.join(sourceDir, 'GOAL.md'),
+            '---\ntitle: 目标\ntags: [goal]\n---\n# 目标\n\n帮助开发者回顾 tokencatcat 用量。tokencatcat 用量很重要。',
+        );
+        await fs.promises.writeFile(
+            path.join(sourceDir, 'changes', '2026-01-01_x_dock.md'),
+            '---\ncommit: abc123\ndate: 2026-01-01\naffectedModules:\n  - dock\n---\n# 变更\n\n新增 dock 模块的 tokencatcat 统计。',
+        );
+
+        hub = new VectorHub({ rootPath: root, embeddings: new MockEmbeddings(), storage: new VirtualFileStorage() });
+        await hub.syncFolder('kb', sourceDir);
+    });
+
+    afterEach(async () => {
+        await fs.promises.rm(sourceDir, { recursive: true, force: true });
+        await fs.promises.rm(root, { recursive: true, force: true });
+    });
+
+    it('enriches results with docType/metadata/chunk position', async () => {
+        const response = await hub.search('tokencatcat', { projects: ['kb'] });
+        assert.ok(response.results.length >= 2);
+        for (const item of response.results) {
+            assert.ok(typeof item.docType == 'string');
+            assert.ok(typeof item.file == 'string');
+            assert.ok(typeof item.chunkIndex == 'number');
+            assert.ok(typeof item.chunkCount == 'number');
+            assert.ok(typeof item.startPos == 'number');
+        }
+        const change = response.results.find((r) => r.docType == 'change');
+        assert.strictEqual(change?.modules, 'dock');
+        assert.strictEqual(change?.tags, undefined);
+    });
+
+    it('filters by docTypes', async () => {
+        const filtered = await hub.search('tokencatcat', { projects: ['kb'], docTypes: ['change'] });
+        assert.ok(filtered.results.length >= 1);
+        assert.ok(filtered.results.every((r) => r.docType == 'change'));
+
+        const none = await hub.search('tokencatcat', { projects: ['kb'], docTypes: ['module'] });
+        assert.strictEqual(none.results.length, 0);
     });
 });
 

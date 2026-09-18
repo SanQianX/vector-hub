@@ -12,9 +12,9 @@ import type { EmbeddingsModel, EmbeddingsResponse } from 'vectra';
  * rebuild behavior without any network calls.
  */
 function mockFactory(): EmbeddingsFactory {
-    return (settings: HubSettings): EmbeddingsModel => {
+    return (settings: HubSettings) => {
         const name = `${settings.provider}:${settings.model ?? 'default'}:${settings.endpoint ?? ''}`;
-        return {
+        const model: EmbeddingsModel & { model: string } = {
             maxTokens: 500,
             model: name,
             async createEmbeddings(inputs: string | string[]): Promise<EmbeddingsResponse> {
@@ -22,6 +22,7 @@ function mockFactory(): EmbeddingsFactory {
                 return { status: 'success', output: texts.map(() => [1, 0]) };
             },
         };
+        return model;
     };
 }
 
