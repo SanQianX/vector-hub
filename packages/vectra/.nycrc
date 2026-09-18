@@ -1,0 +1,29 @@
+{
+  "extension": [
+    ".ts"
+  ],
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "**/node_modules/**",
+    "**/tests/**",
+    "**/coverage/**",
+    "**/*.d.ts",
+    "**/internals/**",
+    "**/*.spec.ts",
+    "**/index.ts",
+    "**/templates/**",
+    "**/*.browser.ts",
+    "**/browser.ts",
+    "**/BrowserWebFetcher.ts",
+    "**/IndexedDBStorage.ts"
+  ],
+  "reporter": [
+    "html",
+    "lcov",
+    "text"
+  ],
+  "all": true,
+  "cache": true
+}
