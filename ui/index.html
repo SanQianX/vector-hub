@@ -728,15 +728,21 @@
     });
   }
 
-  /* 命中块定位：markdown 语法符号会被渲染消费、snippet 可能跨块——
-     先剥离符号再归一化，按长度递减多次尝试匹配渲染后的块级元素。 */
+  /* 命中块定位：markdown 语法符号会被渲染消费、renderSections(ante) 的
+     snippet 常把标题和正文拼在一起导致跨块——按 整串→句子→前缀→中段→词段
+     的顺序生成探针，逐一匹配渲染后的块级元素。 */
   function stripMd(s) { return String(s ?? '').replace(/[#>*`_~|]+/g, ' ').replace(/\s+/g, ' ').trim(); }
   function locateHit(snippet) {
     const stripped = stripMd(normalizeWs(snippet));
     if (!stripped) return;
+    const probes = [];
+    const push = (s) => { const v = stripMd(s); if (v.length >= 6 && !probes.includes(v)) probes.push(v); };
+    push(stripped);
+    for (const sentence of stripped.split(/(?<=[。！？!?])/)) push(sentence);
+    push(stripped.slice(0, 32));
     const mid = Math.floor(stripped.length / 2);
-    const probes = [stripped.slice(0, 60), stripped.slice(0, 32), stripped.slice(Math.max(0, mid - 16), mid + 16)]
-      .filter((p) => p.length >= 8);
+    push(stripped.slice(Math.max(0, mid - 16), mid + 16));
+    for (const seg of stripped.split(' ')) push(seg);
     const blocks = $('dr-body').querySelectorAll('p, li, pre, h1, h2, h3, blockquote, td');
     for (const probe of probes) {
       for (const block of blocks) {

@@ -431,15 +431,21 @@ export function createMockEmbeddings(): EmbeddingsModel & { model: string } {
 
 function bowEmbed(text: string): number[] {
     const vector = new Array<number>(64).fill(0);
-    for (const word of text.toLowerCase().split(/\W+/)) {
+    // Unicode-aware tokens (\W would drop CJK entirely and produce all-zero
+    // vectors → NaN cosine scores in tests).
+    for (const word of text.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
         if (word.length == 0) {
             continue;
         }
         let hash = 0;
         for (const ch of word) {
-            hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+            hash = (hash * 31 + ch.codePointAt(0)!) >>> 0;
         }
         vector[hash % 64] += 1;
+    }
+    if (vector.every((v) => v == 0)) {
+        // Token-less text still needs a non-zero vector to keep cosine defined.
+        vector[0] = 1;
     }
     return vector;
 }

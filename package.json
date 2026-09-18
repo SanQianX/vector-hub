@@ -25,12 +25,14 @@
     "serve": "tsx src/bin.ts serve",
     "sync": "tsx src/bin.ts sync",
     "watch": "tsx src/bin.ts watch",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "vectra": "file:../vectra"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "^25.5.0",
     "marked": "^4.3.0",

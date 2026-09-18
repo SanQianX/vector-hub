@@ -198,6 +198,11 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                     if (!isLoopbackOrigin(req)) {
                         return sendJsonNoCors(res, 403, { error: 'Forbidden origin.' });
                     }
+                    // E2E/hermetic mode: report unavailable so the UI falls
+                    // back to manual path entry instead of popping a dialog.
+                    if (process.env.VECTOR_HUB_DISABLE_PICKER == '1') {
+                        return sendJsonNoCors(res, 501, { error: 'picker disabled for this environment' });
+                    }
                     const result = await pickFolder();
                     return sendJsonNoCors(res, 200, result);
                 }
