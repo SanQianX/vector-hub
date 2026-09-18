@@ -430,7 +430,7 @@ export function createMockEmbeddings(): EmbeddingsModel & { model: string } {
 }
 
 function bowEmbed(text: string): number[] {
-    const vector = new Array<number>(64).fill(0);
+    const vector: number[] = new Array(64).fill(0);
     // Unicode-aware tokens (\W would drop CJK entirely and produce all-zero
     // vectors → NaN cosine scores in tests).
     for (const word of text.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
