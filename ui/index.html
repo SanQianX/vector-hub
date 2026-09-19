@@ -40,6 +40,8 @@
 
   #app { flex: 1; display: flex; min-height: 0; }
   aside { width: 248px; min-width: 248px; background: var(--bg-side); display: flex; flex-direction: column; }
+  /* embed 模式（被知识库壳嵌入）：折叠整个侧栏，由壳 postMessage 控制 */
+  body.embed-collapse aside { display: none; }
   .brand { display: flex; align-items: center; gap: 8px; padding: 14px 14px 10px; }
   .brand .mark { width: 22px; height: 22px; border-radius: 6px; background: var(--text); color: #16171a; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
   .brand .name { font-size: 13px; font-weight: 600; }
@@ -916,6 +918,49 @@
     updateConfiguredUi();
     await loadProjects();
     refreshHealth();
+  })();
+
+  /* ============ embed bridge（被外部壳嵌入时受控） ============
+   * 壳 postMessage：{type:'kb:sidebar', visible} 折叠/展开项目侧栏；
+   * {type:'kb:select-project', project} 把检索范围切到指定项目（按项目名匹配）。
+   * URL 参数：?embed=1 进入嵌入态（默认折叠，sidebar=1 保持展开），project= 预选。
+   * 就绪后回发 {type:'kb:ready', app:'vector-hub'}；选择结果回发 kb:projects。 */
+  function embedAllowedOrigin(origin) {
+    if (origin === 'null') return true; // file:// 壳
+    try { const u = new URL(origin); return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '[::1]'; }
+    catch { return false; }
+  }
+  function setEmbedSideVisible(visible) { document.body.classList.toggle('embed-collapse', !visible); }
+  function embedSelectProject(ref) {
+    const name = String(ref || '');
+    const p = state.projects.find(x => x.name === name || (x.sourceDir || '') === name);
+    if (!p) return false;
+    state.selected = new Set([p.name]);
+    renderProjects();
+    if ($('q').value.trim()) runSearch();
+    return true;
+  }
+  window.addEventListener('message', ev => {
+    if (!embedAllowedOrigin(ev.origin)) return;
+    const d = ev.data;
+    if (!d || typeof d !== 'object') return;
+    if (d.type === 'kb:sidebar') setEmbedSideVisible(!!d.visible);
+    else if (d.type === 'kb:select-project' && ev.source) {
+      const ok = embedSelectProject(d.project);
+      ev.source.postMessage({ type: 'kb:projects', app: 'vector-hub', ok, selected: [...state.selected], projects: state.projects.map(x => x.name) }, '*');
+    }
+  });
+  (function () {
+    const q = new URLSearchParams(location.search);
+    if (q.get('embed') === '1') {
+      setEmbedSideVisible(q.get('sidebar') !== '1');
+      const preset = q.get('project');
+      if (preset) {
+        const trySelect = () => { if (!embedSelectProject(preset) && state.projects.length === 0) setTimeout(trySelect, 500); };
+        setTimeout(trySelect, 0);
+      }
+    }
+    if (window.parent !== window) window.parent.postMessage({ type: 'kb:ready', app: 'vector-hub' }, '*');
   })();
 })();
 </script>
