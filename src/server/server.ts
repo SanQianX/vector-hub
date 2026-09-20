@@ -203,7 +203,13 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                     if (process.env.VECTOR_HUB_DISABLE_PICKER == '1') {
                         return sendJsonNoCors(res, 501, { error: 'picker disabled for this environment' });
                     }
-                    const result = await pickFolder();
+                    // Optional `win=x,y,w,h` anchors the dialog on the calling
+                    // browser window (unified picker contract).
+                    const parts = (url.searchParams.get('win') ?? '').split(',').map(Number);
+                    const windowRect = parts.length == 4 && parts.every(Number.isFinite)
+                        ? { x: parts[0], y: parts[1], width: parts[2], height: parts[3] }
+                        : undefined;
+                    const result = await pickFolder({ title: '选择知识库文件夹', windowRect });
                     return sendJsonNoCors(res, 200, result);
                 }
 

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { HubManager } from './server/manager';
 import { createServer } from './server/server';
+import { warmFolderPicker } from './server/folder-picker';
 
 /**
  * vector-hub CLI
@@ -35,6 +36,12 @@ async function main(): Promise<void> {
                 console.log(`  REST search (shared by UI and AI): http://localhost:${port}/api/search?q=...`);
             });
             await manager.resumeWatchers();
+            // Compile the folder-picker helper up front so the first "browse…"
+            // click pops the dialog in milliseconds instead of paying the
+            // powershell + Add-Type startup. Never blocks or crashes serve.
+            if (process.env.VECTOR_HUB_DISABLE_PICKER != '1') {
+                void warmFolderPicker({ title: '选择知识库文件夹' });
+            }
             break;
         }
 
