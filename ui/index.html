@@ -783,12 +783,14 @@
       if (picked.path) {
         $('imp-path').value = picked.path;
         $('imp-name').value = picked.path.split(/[\\/]/).filter(Boolean).pop() || '';
+        $('import-modal').classList.add('open');
       }
+      // Cancelled the native dialog: the user aborted, so no import modal.
     } catch (err) {
       if (err.status != 501 && err.status != 500) { toast('打开文件夹选择器失败：' + err.message, true); return; }
       toast('无法打开系统选择器，请手动输入路径', true);
+      $('import-modal').classList.add('open');
     }
-    $('import-modal').classList.add('open');
   }
   $('imp-browse').addEventListener('click', async () => {
     try {
