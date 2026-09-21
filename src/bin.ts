@@ -21,6 +21,21 @@ async function main(): Promise<void> {
         return i >= 0 ? args[i + 1] : undefined;
     };
 
+    if (command === '-v' || command === '--version' || command === 'version') {
+        const { version } = require('../../package.json') as { version: string };
+        console.log(`vector-hub v${version}`);
+        return;
+    }
+    if (command === '-h' || command === '--help' || command === 'help' || !command) {
+        console.log(`vector-hub <serve|sync|watch> [options]
+
+  serve  [--port 8787] [--root DIR]   Start the REST API + visual console
+  sync   --project NAME --source DIR  One-shot folder sync into a project
+  watch  --project NAME --source DIR  Continuous folder sync (keeps running)
+  -v/--version, -h/--help`);
+        return;
+    }
+
     const manager = await HubManager.load({
         rootPath: get('root') ?? process.env.VECTOR_HUB_ROOT,
     });
@@ -30,6 +45,14 @@ async function main(): Promise<void> {
         case 'serve': {
             const port = Number(get('port') ?? 8787);
             const server = http.createServer(createServer(manager));
+            server.on('error', (err: NodeJS.ErrnoException) => {
+                if (err.code === 'EADDRINUSE') {
+                    console.error(`Port ${port} is already in use — a vector-hub instance may already be running.`);
+                    console.error(`  Open http://localhost:${port} to use it, or start on another port: vector-hub serve --port ${port + 1}`);
+                    process.exit(1);
+                }
+                throw err;
+            });
             server.listen(port, () => {
                 console.log(`vector-hub serving on http://localhost:${port}`);
                 console.log(`  root:       ${hub.rootPath}`);
