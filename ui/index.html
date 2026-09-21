@@ -46,6 +46,7 @@
   .brand .mark { width: 22px; height: 22px; border-radius: 6px; background: var(--text); color: #16171a; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
   .brand .name { font-size: 13px; font-weight: 600; }
   .brand .name em { font-style: normal; color: var(--text-3); font-weight: 400; }
+  .brand .name .ver { font-size: 11px; color: var(--text-3); font-weight: 400; margin-left: 2px; }
 
   .side-scroll { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   .proj-filter { display: flex; align-items: center; gap: 6px; height: 28px; background: var(--bg-input); border-radius: 7px; padding: 0 8px; color: var(--text-3); margin: 2px 0 4px; }
@@ -239,7 +240,7 @@
   <aside>
     <div class="brand">
       <div class="mark">V</div>
-      <div class="name">vector-hub <em>控制台</em></div>
+      <div class="name">vector-hub <em>控制台</em> <span class="ver" id="brand-ver">v__APP_VERSION__</span></div>
     </div>
     <div class="side-scroll">
       <div class="group-label">
@@ -447,6 +448,10 @@
     host.appendChild(t);
     setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 200); }, 3200);
   }
+
+  // 版本号由服务端注入；未被替换（如直接以文件方式打开）时隐藏占位符。
+  const brandVer = document.getElementById('brand-ver');
+  if (brandVer && brandVer.textContent.includes('__APP_VERSION__')) brandVer.remove();
 
   /* ============ 全局状态 ============ */
   const state = { projects: [], selected: new Set(), projQuery: '', typeFilter: '', configured: true, busy: false, rebuildTimer: null };

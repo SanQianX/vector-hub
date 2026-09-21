@@ -239,9 +239,16 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
 async function serveUi(res: http.ServerResponse, candidates: string[]): Promise<void> {
     for (const candidate of candidates) {
         if (fs.existsSync(candidate)) {
-            const html = await fs.promises.readFile(candidate);
+            let html = await fs.promises.readFile(candidate, 'utf8');
+            const version = appVersion();
+            if (version) {
+                html = html.replaceAll('__APP_VERSION__', version);
+            }
             res.writeHead(200, {
                 'Content-Type': 'text/html; charset=utf-8',
+                // The console page is injected per boot (version token); never
+                // let a browser serve a stale copy after a server restart.
+                'Cache-Control': 'no-store',
                 ...corsHeaders(),
             });
             res.end(html);
@@ -249,6 +256,27 @@ async function serveUi(res: http.ServerResponse, candidates: string[]): Promise<
         }
     }
     sendJson(res, 500, { error: 'ui/index.html not found. Pass ServerOptions.uiPath.' });
+}
+
+let cachedVersion: string | null = null;
+
+/** Package version injected into the console page (`v__APP_VERSION__` token). */
+function appVersion(): string {
+    if (cachedVersion != null) {
+        return cachedVersion;
+    }
+    const candidates = [
+        path.resolve(__dirname, '../../package.json'), // src/ layout (tsx)
+        path.resolve(__dirname, '../../../package.json'), // dist/cjs/server layout
+        path.resolve(process.cwd(), 'package.json'),
+    ];
+    try {
+        const found = candidates.find((candidate) => fs.existsSync(candidate));
+        cachedVersion = found ? String(JSON.parse(fs.readFileSync(found, 'utf8'))?.version ?? '') : '';
+    } catch {
+        cachedVersion = '';
+    }
+    return cachedVersion;
 }
 
 async function serveStatic(res: http.ServerResponse, filePath: string, contentType: string): Promise<void> {
