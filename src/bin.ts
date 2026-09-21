@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import http from 'node:http';
 import { HubManager } from './server/manager';
 import { createServer } from './server/server';

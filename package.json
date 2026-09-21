@@ -1,5 +1,5 @@
 {
-  "name": "@sanqianx/vector-hub",
+  "name": "vector-hub",
   "version": "1.0.2",
   "description": "Generic multi-project vector retrieval library (built on Vectra) with a pluggable HTTP layer and a built-in visual console. Embed it into any project; the UI and AI agents share the same /api/search path.",
   "license": "MIT",
