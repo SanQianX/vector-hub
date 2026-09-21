@@ -1,8 +1,8 @@
 import assert from 'node:assert';
 import path from 'node:path';
 import { VectorHub } from '../src/core/hub';
-import type { EmbeddingsModel, EmbeddingsResponse } from 'vectra';
-import { VirtualFileStorage } from 'vectra';
+import type { EmbeddingsModel, EmbeddingsResponse } from '@sanqianx/vectra';
+import { VirtualFileStorage } from '@sanqianx/vectra';
 
 /**
  * Deterministic bag-of-words embeddings: every word hashes to one of 64

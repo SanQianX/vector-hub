@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { HubManager } from '../src/server/manager';
 import type { HubSettings, EmbeddingsFactory } from '../src/server/manager';
-import type { EmbeddingsModel, EmbeddingsResponse } from 'vectra';
+import type { EmbeddingsModel, EmbeddingsResponse } from '@sanqianx/vectra';
 
 /**
  * Deterministic mock embeddings — the factory returns a model whose name is

@@ -2,9 +2,9 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { LocalDocumentIndex, VirtualFileStorage } from 'vectra';
+import { LocalDocumentIndex, VirtualFileStorage } from '@sanqianx/vectra';
 import { VectorHub } from '../src/core/hub';
-import type { EmbeddingsModel, EmbeddingsResponse } from 'vectra';
+import type { EmbeddingsModel, EmbeddingsResponse } from '@sanqianx/vectra';
 import {
     buildDocument,
     extractMetadata,

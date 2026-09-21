@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createServer } from '../src/server/server';
 import { HubManager } from '../src/server/manager';
 import type { EmbeddingsFactory, HubSettings } from '../src/server/manager';
-import type { EmbeddingsModel, EmbeddingsResponse } from 'vectra';
+import type { EmbeddingsModel, EmbeddingsResponse } from '@sanqianx/vectra';
 
 /**
  * T2 API contract tests: every route, happy path and error path, against an
