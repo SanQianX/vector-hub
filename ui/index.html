@@ -450,8 +450,9 @@
   }
 
   // 版本号由服务端注入；未被替换（如直接以文件方式打开）时隐藏占位符。
+  // 注意：不能检测 __APP_VERSION__ 字面量本身——服务端注入时会把它一并替换掉。
   const brandVer = document.getElementById('brand-ver');
-  if (brandVer && brandVer.textContent.includes('__APP_VERSION__')) brandVer.remove();
+  if (brandVer && !/^v\d+\.\d+/.test(brandVer.textContent)) brandVer.remove();
 
   /* ============ 全局状态 ============ */
   const state = { projects: [], selected: new Set(), projQuery: '', typeFilter: '', configured: true, busy: false, rebuildTimer: null };
