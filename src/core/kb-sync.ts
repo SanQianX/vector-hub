@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { LocalDocumentIndex } from 'vectra';
+import type { LocalDocumentIndex } from '@sanqianx/vectra';
 
 /**
  * Metadata-aware folder synchronization for structured knowledge bases.

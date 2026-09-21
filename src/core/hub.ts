@@ -1,6 +1,6 @@
 import path from 'node:path';
-import { LocalDocumentIndex, LocalFileStorage } from 'vectra';
-import type { EmbeddingsModel, FileStorage, LocalDocumentResult } from 'vectra';
+import { LocalDocumentIndex, LocalFileStorage } from '@sanqianx/vectra';
+import type { EmbeddingsModel, FileStorage, LocalDocumentResult } from '@sanqianx/vectra';
 import { KbFolderWatcher, syncSourceFolder } from './kb-sync';
 import type {
     ProjectInfo,

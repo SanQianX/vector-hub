@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { HubManager, HubSettings } from './manager';
 import { pickFolder } from './folder-picker';
 import { extractMetadata, inferDocType, parseFrontmatter } from '../core/kb-sync';
-import { LocalDocument } from 'vectra';
+import { LocalDocument } from '@sanqianx/vectra';
 
 /**
  * Options for `createServer`.

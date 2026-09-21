@@ -4,7 +4,7 @@ import path from 'node:path';
 import { VectorHub } from '../core/hub';
 import { createMiniMaxEmbeddings, createOpenAIEmbeddings } from '../core/embeddings';
 import { KbFolderWatcher } from '../core/kb-sync';
-import type { EmbeddingsModel } from 'vectra';
+import type { EmbeddingsModel } from '@sanqianx/vectra';
 
 /**
  * Embedding provider + data/sync settings persisted in the global config

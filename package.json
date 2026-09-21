@@ -1,6 +1,6 @@
 {
-  "name": "vector-hub",
-  "version": "0.1.0",
+  "name": "@sanqianx/vector-hub",
+  "version": "1.0.2",
   "description": "Generic multi-project vector retrieval library (built on Vectra) with a pluggable HTTP layer and a built-in visual console. Embed it into any project; the UI and AI agents share the same /api/search path.",
   "license": "MIT",
   "main": "./dist/cjs/index.js",
@@ -8,13 +8,14 @@
   "types": "./dist/cjs/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/cjs/index.d.ts",
       "require": "./dist/cjs/index.js",
       "import": "./dist/esm/index.js"
-    }
+    },
+    "./bin.js": "./dist/cjs/bin.js",
+    "./package.json": "./package.json"
   },
   "bin": {
-    "vector-hub": "./dist/cjs/bin.js"
+    "vector-hub": "dist/cjs/bin.js"
   },
   "engines": {
     "node": ">=22"
@@ -29,10 +30,11 @@
     "test:e2e": "playwright test",
     "build:vectra": "npm --prefix packages/vectra run build",
     "build:all": "npm run build:vectra && npm run build",
-    "test:vectra": "npm --prefix packages/vectra run test:mocha"
+    "test:vectra": "npm --prefix packages/vectra run test:mocha",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "vectra": "file:packages/vectra"
+    "@sanqianx/vectra": "1.0.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
@@ -43,5 +45,11 @@
     "ts-mocha": "11.1.0",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3"
-  }
+  },
+  "files": [
+    "dist",
+    "ui",
+    "README.md",
+    "LICENSE"
+  ]
 }

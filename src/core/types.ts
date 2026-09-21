@@ -1,4 +1,4 @@
-import type { EmbeddingsModel, FileStorage } from 'vectra';
+import type { EmbeddingsModel, FileStorage } from '@sanqianx/vectra';
 
 /**
  * Options for constructing a `VectorHub`.

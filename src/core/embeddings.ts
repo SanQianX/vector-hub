@@ -1,5 +1,5 @@
-import { MiniMaxEmbeddings, OpenAIEmbeddings } from 'vectra';
-import type { MiniMaxEmbeddingsOptions, OpenAIEmbeddingsOptions } from 'vectra';
+import { MiniMaxEmbeddings, OpenAIEmbeddings } from '@sanqianx/vectra';
+import type { MiniMaxEmbeddingsOptions, OpenAIEmbeddingsOptions } from '@sanqianx/vectra';
 
 /**
  * Creates a MiniMax embeddings model (`embo-01`, 1536 dims).
