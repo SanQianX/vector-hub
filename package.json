@@ -1,6 +1,6 @@
 {
   "name": "vector-hub",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Generic multi-project vector retrieval library (built on Vectra) with a pluggable HTTP layer and a built-in visual console. Embed it into any project; the UI and AI agents share the same /api/search path.",
   "license": "MIT",
   "main": "./dist/cjs/index.js",
