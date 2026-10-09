@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import type { HubManager, HubSettings } from './manager';
 import { pickFolder } from './folder-picker';
 import { extractMetadata, inferDocType, parseFrontmatter } from '../core/kb-sync';
@@ -15,6 +16,7 @@ export interface VectorHubServerOptions {
      * `ui/index.html`, resolved from the package layout or the cwd.
      */
     uiPath?: string;
+    runtimeToken?: string;
 }
 
 /**
@@ -28,7 +30,6 @@ export interface VectorHubServerOptions {
  * the server can query the hub identically.
  */
 export function createServer(manager: HubManager, options?: VectorHubServerOptions): http.RequestListener {
-    const hub = manager.hub;
     const uiCandidates = [
         options?.uiPath,
         // dist/cjs/server/server.js → <package root>/ui/index.html
@@ -39,6 +40,27 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
     return async (req, res) => {
         const url = new URL(req.url ?? '/', 'http://localhost');
         const route = `${req.method ?? 'GET'} ${url.pathname}`;
+        const hub = manager.hub;
+        if (url.pathname.startsWith('/api/internal/')) {
+            const token = options?.runtimeToken;
+            const supplied = String(req.headers.authorization ?? '').replace(/^Bearer /, '');
+            const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '');
+            if (!local || req.headers.origin || !manager.managed || !token || Buffer.byteLength(token) !== Buffer.byteLength(supplied) || !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(supplied))) return sendJsonNoCors(res, 403, { error: 'Trusted local service required.' });
+            try {
+                if (route === 'POST /api/internal/embedding-config') return sendJsonNoCors(res, 200, { settings: manager.legacyEmbeddingSettings(), migrationId: manager.embeddingMigrationId() });
+                if (route === 'POST /api/internal/runtime-config') {
+                    const body = await readJsonBody(req);
+                    await manager.applyRuntimeSettings(body.settings ?? null);
+                    return sendJsonNoCors(res, 200, { ok: true });
+                }
+                if (route === 'POST /api/internal/retire-embedding') {
+                    const body = await readJsonBody(req);
+                    await manager.retireLegacyEmbedding(body.migrationId);
+                    return sendJsonNoCors(res, 200, { ok: true });
+                }
+                return sendJsonNoCors(res, 404, { error: 'Not found.' });
+            } catch { return sendJsonNoCors(res, 409, { error: '向量运行配置未生效，现有知识文件保留。' }); }
+        }
 
         try {
             switch (route) {
@@ -129,7 +151,7 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                         settings: settings
                             ? {
                                 ...settings,
-                                apiKey: maskApiKey(settings.apiKey),
+                                apiKey: manager.managed ? '' : maskApiKey(settings.apiKey),
                                 rootPath: manager.hub.rootPath,
                                 extensions: manager.extensions,
                                 debounceMs: manager.debounceMs,
@@ -139,6 +161,7 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                 }
 
                 case 'PUT /api/settings': {
+                    if (manager.managed) return sendJson(res, 409, { error: '请在智脑的系统状态中配置向量模型。' });
                     const body = await readJsonBody(req) as Partial<HubSettings>;
                     if (body?.provider != 'minimax' && body?.provider != 'openai') {
                         return sendJson(res, 400, { error: "Body must include 'provider' of 'minimax' or 'openai'." });

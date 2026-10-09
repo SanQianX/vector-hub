@@ -232,6 +232,15 @@
   .toast .bad-ic { color: var(--red); }
   @keyframes t-in { from { opacity: 0; transform: translateY(6px); } }
   @keyframes t-out { to { opacity: 0; transform: translateY(4px); } }
+  body.kb-embedded[data-kb-theme="light"] { --bg-side:#f8f9fb; --bg-main:#fff; --bg-card:#f8f9fb; --bg-input:#edf1f4; --bg-hover:#edf1f4; --bg-active:#e6edf3; --line:#dce2e8; --text:#202733; --text-2:#687587; --text-3:#8e99a7; --label:#687587; --blue:#516f89; --green:#397761; --red:#a05252; color-scheme:light; }
+  body.kb-embedded[data-kb-theme="dark"] { --bg-side:#1b2028; --bg-main:#20252d; --bg-card:#252b34; --bg-input:#2c333e; --bg-hover:#2c333e; --bg-active:#293748; --line:#39424f; --text:#e6ebf0; --text-2:#a0aaba; --text-3:#788393; --label:#a0aaba; --blue:#8aa8cf; --green:#81b29a; --red:#d88b8b; color-scheme:dark; }
+  body.kb-embedded .topbar, body.kb-embedded #banner-link, body.kb-embedded .filter-row .sep,
+  body.kb-embedded .filter-row .mini:has(#bm25), body.kb-embedded .filter-row .mini:has(#minscore), body.kb-embedded .fchip[data-t="index"] { display:none; }
+  body.kb-embedded .search-zone { padding:24px 32px 16px; }
+  body.kb-embedded .search-row, body.kb-embedded .filter-row { max-width:none; }
+  body.kb-embedded .skel .l1, body.kb-embedded .skel .l2, body.kb-embedded .skel .l3 { background:var(--bg-input); animation:none; }
+  body.kb-embedded .res-meta > span:last-child { display:none; }
+  body.kb-embedded .res .score, body.kb-embedded .filter-row .mini:has(#topk) { display:none; }
 </style>
 </head>
 <body>
@@ -408,7 +417,7 @@
 </div>
 
 <div id="toasts" aria-live="polite"></div>
-<script src="/vendor/marked.min.js"></script>
+<script src="./vendor/marked.min.js"></script>
 <script>
 (function () {
   'use strict';
@@ -427,12 +436,27 @@
   document.querySelectorAll('[data-i]').forEach(el => { el.outerHTML = iconSvg(el.dataset.i, el.dataset.s || 14); });
 
   function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function renderKnowledgeMarkdown(text) {
+    const template = document.createElement('template');
+    template.innerHTML = window.marked ? window.marked.parse(text, { breaks: false }) : '<pre>' + escapeHtml(text) + '</pre>';
+    const allowed = new Set('H1 H2 H3 H4 H5 H6 P BR HR UL OL LI BLOCKQUOTE PRE CODE EM STRONG DEL TABLE THEAD TBODY TR TH TD A SPAN DIV'.split(' '));
+    for (const node of [...template.content.querySelectorAll('*')]) {
+      if (!allowed.has(node.tagName)) { node.remove(); continue; }
+      for (const attribute of [...node.attributes]) if (!['href', 'title'].includes(attribute.name) || node.tagName !== 'A') node.removeAttribute(attribute.name);
+      if (node.tagName === 'A') {
+        const href = node.getAttribute('href') || '';
+        if (!/^https?:\/\//i.test(href) && !/^#[A-Za-z0-9_-]+$/.test(href)) node.removeAttribute('href');
+        node.setAttribute('rel', 'noopener noreferrer'); node.setAttribute('target', '_blank');
+      }
+    }
+    return template.content;
+  }
   function normalizeWs(s) { return String(s ?? '').replace(/\s+/g, ' ').trim(); }
   function fmtCount(n) { return n >= 10000 ? (n / 1000).toFixed(1) + 'k' : String(n ?? 0); }
   const TYPE_LABEL = { goal: '目标', architecture: '架构', change: '变更', module: '模块', 'change-index': '索引', 'module-index': '索引', readme: '说明', doc: '文档' };
 
   async function api(path, options) {
-    const res = await fetch(path, options);
+    const res = await fetch(path.replace(/^\/api(?=\/|$)/, moduleApiBase), options);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(data.error || ('HTTP ' + res.status)), { status: res.status });
     return data;
@@ -455,6 +479,18 @@
   if (brandVer && !/^v\d+\.\d+/.test(brandVer.textContent)) brandVer.remove();
 
   /* ============ 全局状态 ============ */
+  const embedQuery = new URLSearchParams(location.search);
+  const embedded = embedQuery.get('embed') === '1';
+  const moduleApiBase = /^\/api\/[a-z0-9/-]+$/i.test(embedQuery.get('apiBase') || '') ? embedQuery.get('apiBase').replace(/\/$/, '') : '/api';
+  const engineApiBase = /^\/api\/[a-z0-9/-]+$/i.test(embedQuery.get('engineBase') || '') ? embedQuery.get('engineBase').replace(/\/$/, '') : '/api/engine';
+  const embedContext = { projectId: embedQuery.get('projectId') || '', scope: 'project', requestId: null };
+  let searchEpoch = 0;
+  async function engineApi(route, input) {
+    const response = await fetch(`${engineApiBase}/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.message || '知识检索暂不可用');
+    return payload;
+  }
   const state = { projects: [], selected: new Set(), projQuery: '', typeFilter: '', configured: true, busy: false, rebuildTimer: null };
 
   /* ============ 侧栏 ============ */
@@ -537,10 +573,10 @@
 
   /* ============ 未配置 / 重建 banner ============ */
   function updateConfiguredUi() {
-    const unconfigured = !state.configured;
+    const unconfigured = !state.configured && !embedded;
     $('sbox').classList.toggle('disabled', unconfigured);
     $('q').disabled = unconfigured;
-    $('search-btn').disabled = unconfigured || state.busy;
+    $('search-btn').disabled = (embedded ? !embedContext.projectId : unconfigured) || state.busy;
     $('banner').classList.toggle('show', unconfigured);
     $('banner-text').textContent = unconfigured ? '尚未配置 Embedding 模型，搜索不可用。' : $('banner-text').textContent;
     $('banner-link').style.display = unconfigured ? '' : 'none';
@@ -581,7 +617,8 @@
   /* ============ 搜索 ============ */
   async function runSearch() {
     const q = $('q').value.trim();
-    if (!q || state.busy || !state.configured) return;
+    if (!q || state.busy || (!embedded && !state.configured) || (embedded && !embedContext.projectId)) return;
+    const epoch = ++searchEpoch;
     state.busy = true;
     $('search-btn').disabled = true;
     $('search-btn').classList.add('busy');
@@ -594,14 +631,28 @@
       params.set('maxResults', $('topk').value || '10');
       params.set('minScore', $('minscore').value);
       if ($('bm25').checked) params.set('isBm25', 'true');
-      const data = await api('/api/search?' + params.toString());
+      let data;
+      if (embedded) {
+        const started = performance.now();
+        const found = await engineApi('search', { projectId: embedContext.projectId, scope: embedContext.scope, query: q, limit: $('topk').value || 10 });
+        if (epoch !== searchEpoch) return;
+        embedContext.results = found.results;
+        data = { tookMs: Math.round(performance.now() - started), projectsSearched: [...new Set(found.results.map(r => r.scope_project_id))], results: found.results.map(r => ({ project: r.scope_project_id, uri: r.entry_id, file: `${r.projectName || r.scope_project_id} / ${r.entry_id}`, score: r.relevance_score, snippet: r.chunk_text, commit: r.commitSha, docType: r.entry_id.startsWith('changes/') ? 'change' : r.entry_id.startsWith('modules/') ? 'module' : r.entry_id === 'GOAL.md' ? 'goal' : r.entry_id === 'ARCHITECTURE.md' ? 'architecture' : 'readme' })) };
+        if (docTypes.length) data.results = data.results.filter(r => docTypes.includes(r.docType));
+        const seen = new Set();
+        data.results = data.results.filter(r => { const key = `${r.project}:${r.uri}:${r.commit || ''}`; if (seen.has(key)) return false; seen.add(key); return true; });
+      } else data = await api('/api/search?' + params.toString());
+      if (epoch !== searchEpoch) return;
       renderResults(q, data, '/api/search?' + params.toString());
     } catch (err) {
+      if (epoch !== searchEpoch) return;
       $('results').innerHTML = '<div class="empty"><div class="box"><div class="t1">检索失败</div><div class="t2">' + escapeHtml(err.message) + '</div></div></div>';
     } finally {
-      state.busy = false;
-      $('search-btn').classList.remove('busy');
-      $('search-btn').disabled = !state.configured;
+      if (epoch === searchEpoch) {
+        state.busy = false;
+        $('search-btn').classList.remove('busy');
+        $('search-btn').disabled = embedded ? !embedContext.projectId : !state.configured;
+      }
     }
   }
 
@@ -613,21 +664,23 @@
 
   function renderResults(q, data, apiUrl) {
     const el = $('results');
-    if (state.projects.length == 0) {
+    if (state.projects.length == 0 && !embedded) {
       el.innerHTML = '<div class="empty"><div class="box"><div class="tile">' + iconSvg('doc', 18) + '</div><div class="t1">知识库还是空的</div><div class="t2"><span class="linklike" id="go-import">导入本地文件夹</span>，或通过 API 写入第一批文档</div></div></div>';
       $('go-import').addEventListener('click', openImport);
       return;
     }
     const errors = (data.errors || []).map(e => '<div class="empty" style="margin:0 0 8px"><div class="box" style="border-color:var(--red);padding:8px 14px"><div class="t2">项目 ' + escapeHtml(e.project) + ' 检索出错：' + escapeHtml(e.message) + '</div></div></div>').join('');
     if ((data.results || []).length == 0) {
-      el.innerHTML = errors + '<div class="empty"><div class="box"><div class="tile">' + iconSvg('doc', 18) + '</div><div class="t1">没有命中结果</div><div class="t2">试着切换类型过滤、降低阈值，或改写问题</div></div></div>';
+      el.innerHTML = errors + '<div class="empty"><div class="box"><div class="tile">' + iconSvg('doc', 18) + '</div><div class="t1">没有命中结果</div><div class="t2">' + (embedded ? '尝试切换知识范围、类型或改写问题。' : '试着切换类型过滤、降低阈值，或改写问题') + '</div></div></div>';
       return;
     }
     const skipped = (data.projectsSkipped || []).length ? '（跳过未建索引：' + escapeHtml(data.projectsSkipped.join(', ')) + '）' : '';
-    el.innerHTML = errors + '<div class="res-meta"><span>' + data.results.length + ' 条结果 · ' + data.tookMs + 'ms · ' + (data.projectsSearched || []).length + ' 项目' + skipped + '</span><span>GET ' + escapeHtml(apiUrl.length > 90 ? apiUrl.slice(0, 90) + '…' : apiUrl) + '</span></div>';
+    el.innerHTML = errors + '<div class="res-meta"><span>' + data.results.length + (embedded ? ' 份知识' : ' 条结果 · ' + data.tookMs + 'ms · ' + (data.projectsSearched || []).length + ' 项目') + skipped + '</span><span>GET ' + escapeHtml(apiUrl.length > 90 ? apiUrl.slice(0, 90) + '…' : apiUrl) + '</span></div>';
     for (const r of data.results) {
       const row = document.createElement('div');
       row.className = 'res';
+      row.setAttribute('role', 'button'); row.tabIndex = 0;
+      row.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDoc(r.project, r.uri, r.snippet); } });
       const badge = TYPE_LABEL[r.docType] || r.docType || '文档';
       const r2 = [];
       if (r.date) r2.push(escapeHtml(r.date));
@@ -676,7 +729,9 @@
 
   /* ============ 文档抽屉 ============ */
   const drawerHistory = [];
+  let documentEpoch = 0;
   async function openDoc(project, uri, snippet, pushHist = true) {
+    const epoch = ++documentEpoch;
     if (pushHist && $('drawer').classList.contains('open')) drawerHistory.push({ project: $('drawer').dataset.project, uri: $('drawer').dataset.uri, snippet: $('drawer').dataset.snippet || '' });
     $('dr-path').textContent = uri;
     $('dr-body').innerHTML = '<div class="skel"><div class="l1"></div><div class="l2"></div><div class="l3"></div><div class="l3"></div><div class="l3"></div></div>';
@@ -689,7 +744,13 @@
     $('drawer-mask').classList.add('open');
     $('drawer').classList.add('open');
     try {
-      const doc = await api('/api/document?project=' + encodeURIComponent(project) + '&uri=' + encodeURIComponent(uri));
+      let doc;
+      if (embedded) {
+        const row = (embedContext.results || []).find(r => r.scope_project_id === project && r.entry_id === uri);
+        const result = await engineApi('get', { projectId: /^(brain|domain):/.test(row?.space_id || '') ? embedContext.projectId : project, spaceId: row?.space_id, entryId: uri });
+        doc = { text: result.chunks.map(c => c.chunk_text).join('\n'), uri };
+      } else doc = await api('/api/document?project=' + encodeURIComponent(project) + '&uri=' + encodeURIComponent(uri));
+      if (epoch !== documentEpoch || !$('drawer').classList.contains('open') || $('drawer').dataset.project !== project || $('drawer').dataset.uri !== uri) return;
       const badge = TYPE_LABEL[doc.docType] || doc.docType || '文档';
       $('dr-type').textContent = badge;
       $('dr-title').textContent = doc.title || (doc.uri || uri).split(/[\\/]/).pop();
@@ -702,11 +763,12 @@
       if (doc.module) kv.push(escapeHtml(doc.module));
       $('dr-kv').innerHTML = kv.join('');
       // markdown 渲染
-      $('dr-body').innerHTML = window.marked ? window.marked.parse(doc.text || '', { breaks: false }) : '<pre>' + escapeHtml(doc.text || '') + '</pre>';
+      $('dr-body').replaceChildren(renderKnowledgeMarkdown(doc.text || ''));
       wireDocLinks(project);
       buildToc();
       locateHit(snippet);
     } catch (err) {
+      if (epoch !== documentEpoch || !$('drawer').classList.contains('open')) return;
       $('dr-body').innerHTML = '<div class="empty" style="margin:40px 0 0"><div class="box"><div class="t1">无法加载文档</div><div class="t2">' + escapeHtml(err.message) + '</div></div></div>';
       $('dr-title').textContent = '';
     }
@@ -934,8 +996,7 @@
    * URL 参数：?embed=1 进入嵌入态（默认折叠，sidebar=1 保持展开），project= 预选。
    * 就绪后回发 {type:'kb:ready', app:'vector-hub'}；选择结果回发 kb:projects。 */
   function embedAllowedOrigin(origin) {
-    if (origin === 'null') return true; // file:// 壳
-    try { const u = new URL(origin); return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '[::1]'; }
+    try { return origin === (document.referrer ? new URL(document.referrer).origin : location.origin); }
     catch { return false; }
   }
   function setEmbedSideVisible(visible) { document.body.classList.toggle('embed-collapse', !visible); }
@@ -949,18 +1010,32 @@
     return true;
   }
   window.addEventListener('message', ev => {
-    if (!embedAllowedOrigin(ev.origin)) return;
+    if (ev.source !== window.parent || !embedAllowedOrigin(ev.origin)) return;
     const d = ev.data;
     if (!d || typeof d !== 'object') return;
+    if (d.type === 'kb:theme') { document.body.dataset.kbTheme = d.theme === 'dark' ? 'dark' : 'light'; return; }
+    if (d.type === 'kb:scope') { embedContext.scope = ['project', 'domain', 'brain'].includes(d.scope) ? d.scope : 'project'; if ($('q').value.trim()) { state.busy = false; runSearch(); } return; }
     if (d.type === 'kb:sidebar') setEmbedSideVisible(!!d.visible);
     else if (d.type === 'kb:select-project' && ev.source) {
+      searchEpoch++;
+      documentEpoch++;
+      drawerHistory.length = 0;
+      embedContext.results = [];
+      state.busy = false;
+      embedContext.projectId = d.projectId || d.project;
+      embedContext.requestId = d.requestId;
+      $('drawer').classList.remove('open'); $('drawer-mask').classList.remove('open');
       const ok = embedSelectProject(d.project);
-      ev.source.postMessage({ type: 'kb:projects', app: 'vector-hub', ok, selected: [...state.selected], projects: state.projects.map(x => x.name) }, '*');
+      if (!ok && $('q').value.trim()) runSearch();
+      $('search-btn').disabled = !embedContext.projectId;
+      ev.source.postMessage({ type: 'kb:projects', app: 'vector-hub', ok: embedded ? !!embedContext.projectId : ok, requestId: d.requestId, projectId: embedContext.projectId, selected: [...state.selected], projects: state.projects.map(x => x.name) }, ev.origin);
     }
   });
   (function () {
     const q = new URLSearchParams(location.search);
     if (q.get('embed') === '1') {
+      document.body.classList.add('kb-embedded');
+      document.body.dataset.kbTheme = q.get('theme') === 'dark' ? 'dark' : 'light';
       setEmbedSideVisible(q.get('sidebar') !== '1');
       const preset = q.get('project');
       if (preset) {

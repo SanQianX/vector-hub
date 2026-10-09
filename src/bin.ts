@@ -38,13 +38,17 @@ async function main(): Promise<void> {
 
     const manager = await HubManager.load({
         rootPath: get('root') ?? process.env.VECTOR_HUB_ROOT,
+        configPath: get('config') ?? process.env.VECTOR_HUB_CONFIG,
+        managed: process.env.KB_VECTOR_MANAGED === '1',
+        legacyConfigPath: process.env.VECTOR_HUB_LEGACY_CONFIG,
     });
     const hub = manager.hub;
 
     switch (command) {
         case 'serve': {
             const port = Number(get('port') ?? 8787);
-            const server = http.createServer(createServer(manager));
+            const host = get('host') ?? '127.0.0.1';
+            const server = http.createServer(createServer(manager, { runtimeToken: process.env.KB_VECTOR_RUNTIME_TOKEN }));
             server.on('error', (err: NodeJS.ErrnoException) => {
                 if (err.code === 'EADDRINUSE') {
                     console.error(`Port ${port} is already in use — a vector-hub instance may already be running.`);
@@ -53,12 +57,16 @@ async function main(): Promise<void> {
                 }
                 throw err;
             });
-            server.listen(port, () => {
-                console.log(`vector-hub serving on http://localhost:${port}`);
+            server.listen(port, host, () => {
+                console.log(`vector-hub serving on http://${host}:${port}`);
                 console.log(`  root:       ${hub.rootPath}`);
                 console.log(`  embeddings: ${hub.embeddingsModelName ?? 'not configured (open the UI to set up)'}`);
                 console.log(`  REST search (shared by UI and AI): http://localhost:${port}/api/search?q=...`);
             });
+            let stopping = false;
+            const stop = () => { if (stopping) return; stopping = true; server.closeAllConnections?.(); server.close(() => process.exit(0)); };
+            process.once('SIGINT', stop); process.once('SIGTERM', stop);
+            process.on('message', (message: unknown) => { if ((message as { type?: string })?.type === 'kb:shutdown') stop(); });
             await manager.resumeWatchers();
             // Compile the folder-picker helper up front so the first "browse…"
             // click pops the dialog in milliseconds instead of paying the

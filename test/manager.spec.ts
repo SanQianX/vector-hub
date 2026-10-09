@@ -122,6 +122,19 @@ describe('HubManager (global config + data root separation)', () => {
         await assert.rejects(() => manager.import(filePath), /Not a folder/);
     });
 
+    it('explicit watch:false stops an existing watcher for engine-owned indexing', async () => {
+        const manager = await makeManager();
+        try {
+            await manager.saveSettings({ provider: 'minimax', apiKey: 'k' });
+            const first = await manager.import(sourceDir, 'engine-project', true);
+            assert.strictEqual(manager.isWatching(first.project), true);
+            await manager.import(sourceDir, first.project, false);
+            assert.strictEqual(manager.isWatching(first.project), false);
+            assert.strictEqual(manager.registrations[first.project].watch, false);
+            assert.strictEqual((await manager.hub.listProjects()).find(p => p.name === first.project)?.docCount, 2);
+        } finally { await manager.deleteProject('engine-project'); }
+    });
+
     it('rebuilds indexed projects with a sourceDir after a model change and reports manual ones', async () => {
         const manager = await makeManager();
         await manager.saveSettings({ provider: 'minimax', apiKey: 'k' });
@@ -151,6 +164,30 @@ describe('HubManager (global config + data root separation)', () => {
         // reported as manual — stale vectors, needs re-import by the caller.
         assert.strictEqual(projects.find((p) => p.name == 'api-project')?.hasIndex, true);
         assert.strictEqual(manager.hub.embeddingsModelName, 'minimax:embo-v2:');
+    });
+
+    it('managed startup retires old watchers without deleting indexes; standalone watching remains available', async () => {
+        const standalone = await makeManager();
+        await standalone.saveSettings({ provider: 'minimax', apiKey: 'test-only' });
+        await standalone.import(sourceDir, 'managed-project', false);
+        const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+        config.projects['managed-project'].watch = true;
+        await fs.promises.writeFile(configPath, JSON.stringify(config));
+        const managed = await HubManager.load({ rootPath: root, configPath, managed: true, embeddingsFactory: mockFactory() });
+        await managed.resumeWatchers();
+        assert.strictEqual(managed.isWatching('managed-project'), false);
+        assert.strictEqual(managed.registrations['managed-project'].watch, false);
+        assert.strictEqual((await managed.hub.listProjects()).find(p => p.name === 'managed-project')?.docCount, 2);
+        assert.strictEqual(JSON.parse(await fs.promises.readFile(configPath, 'utf8')).projects['managed-project'].watch, false);
+        await managed.applyRuntimeSettings({ provider: 'minimax', apiKey: 'test-runtime' });
+        await waitFor(() => !managed.rebuildStatus.running);
+        await managed.import(sourceDir, 'managed-project', true);
+        assert.strictEqual(managed.isWatching('managed-project'), false);
+        assert.strictEqual(managed.registrations['managed-project'].watch, false);
+        try {
+            await standalone.import(sourceDir, 'standalone-project', true);
+            assert.strictEqual(standalone.isWatching('standalone-project'), true);
+        } finally { await standalone.deleteProject('standalone-project'); }
     });
 
     it('hot-switches the data directory: new root active, old root untouched, registrations kept', async () => {

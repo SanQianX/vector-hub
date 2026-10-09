@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { VectorHub } from '../core/hub';
 import { createMiniMaxEmbeddings, createOpenAIEmbeddings } from '../core/embeddings';
 import { KbFolderWatcher } from '../core/kb-sync';
@@ -64,6 +65,10 @@ export interface HubManagerOptions {
     configPath?: string;
     /** Embeddings factory override (tests / mock mode). */
     embeddingsFactory?: EmbeddingsFactory;
+    /** Shell-managed mode: credentials arrive through the private runtime API. */
+    managed?: boolean;
+    /** Read-only legacy source; no project registrations are adopted. */
+    legacyConfigPath?: string;
 }
 
 export const DEFAULT_EXTENSIONS = ['.md', '.txt', '.html'];
@@ -80,6 +85,9 @@ const DEFAULT_MODELS: Record<HubSettings['provider'], string> = {
 export class HubManager {
     public hub: VectorHub;
     public readonly configPath: string;
+    public readonly managed: boolean;
+    private _runtimeSettings?: HubSettings;
+    private _runtimeSignature = '';
 
     private _config: HubConfigFile = {};
     private readonly _watchers = new Map<string, KbFolderWatcher>();
@@ -89,6 +97,7 @@ export class HubManager {
 
     private constructor(options: HubManagerOptions, hub: VectorHub, config: HubConfigFile) {
         this.configPath = options.configPath ?? defaultConfigPath();
+        this.managed = options.managed === true;
         this._cliRootPath = options.rootPath;
         this._embeddingsFactory = options.embeddingsFactory ?? defaultEmbeddingsFactory;
         this._config = config;
@@ -107,10 +116,12 @@ export class HubManager {
         const configPath = options.configPath ?? defaultConfigPath();
         let config: HubConfigFile = {};
         let migrated = false;
+        let configMissing = false;
 
         try {
             config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
         } catch {
+            configMissing = true;
             // No global config yet — check for a legacy config inside the data dir.
             const cliRoot = options.rootPath ?? process.env.VECTOR_HUB_ROOT ?? './data';
             const legacyPath = path.join(path.resolve(cliRoot), 'hub.json');
@@ -122,7 +133,20 @@ export class HubManager {
             }
         }
 
-        const settings = config.settings?.apiKey
+        if (options.managed && configMissing && options.legacyConfigPath) {
+            let legacy: HubConfigFile = {};
+            try { legacy = JSON.parse(await fs.promises.readFile(options.legacyConfigPath, 'utf8')); } catch {}
+            if (legacy.settings?.apiKey) {
+                const settings = normalizeSettings(legacy.settings);
+                // Read the old standalone key without adopting its projects or
+                // writing back to a service the shell does not own.
+                config = { settings: { provider: settings.provider, apiKey: settings.apiKey, model: settings.model, endpoint: settings.endpoint } };
+                await fs.promises.mkdir(path.dirname(configPath), { recursive: true, mode: 0o700 });
+                await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2), { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+            }
+        }
+
+        const settings = options.managed ? undefined : config.settings?.apiKey
             ? normalizeSettings(config.settings)
             : process.env.MINIMAX_API_KEY
                 ? normalizeSettings({ provider: 'minimax', apiKey: process.env.MINIMAX_API_KEY })
@@ -139,7 +163,7 @@ export class HubManager {
         });
         const manager = new HubManager(options, hub, config);
 
-        if (migrated || settings?.rootPath == undefined) {
+        if (!options.managed && (migrated || settings?.rootPath == undefined)) {
             // Persist immediately: record the effective data root (and complete
             // the legacy migration) so the config is authoritative from now on.
             manager._config.settings = settings ? { ...settings, rootPath } : { provider: 'minimax', apiKey: '', rootPath };
@@ -153,6 +177,7 @@ export class HubManager {
 
     /** Current settings (as persisted). Undefined while no API key is configured. */
     public get settings(): HubSettings | undefined {
+        if (this.managed) return this._runtimeSettings;
         const persisted = this._config.settings;
         if (!persisted?.apiKey) {
             return undefined;
@@ -188,6 +213,7 @@ export class HubManager {
      * @returns The rebuild status if a rebuild was triggered, else undefined.
      */
     public async saveSettings(next: HubSettings): Promise<RebuildStatus | undefined> {
+        if (this.managed) throw Object.assign(new Error('请在智脑的系统状态中配置向量模型。'), { status: 409 });
         const normalized = normalizeSettings(next);
         const previousModelKey = this._modelKey(this.settings);
         const previousRoot = path.resolve(this._config.settings?.rootPath ?? this.hub.rootPath);
@@ -217,6 +243,36 @@ export class HubManager {
         return rebuild;
     }
 
+    public legacyEmbeddingSettings(): HubSettings | null {
+        return this._config.settings?.apiKey ? normalizeSettings(this._config.settings) : null;
+    }
+
+    public embeddingMigrationId(): string { return `embedding-${crypto.createHash('sha256').update(path.resolve(this.configPath)).digest('hex')}`; }
+
+    public async retireLegacyEmbedding(migrationId: string): Promise<void> {
+        if (!this.managed || !/^embedding-[a-f0-9]{64}$/.test(migrationId)) throw new Error('Invalid embedding migration');
+        if (!this._config.settings?.apiKey) return;
+        const backup = path.join(path.dirname(this.configPath), 'recovery', migrationId, 'vector-config.json');
+        await fs.promises.mkdir(path.dirname(backup), { recursive: true, mode: 0o700 });
+        try { await fs.promises.copyFile(this.configPath, backup, fs.constants.COPYFILE_EXCL); await fs.promises.chmod(backup, 0o600); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+        this._config.settings = { ...this._config.settings, apiKey: '' };
+        await this._saveConfig();
+    }
+
+    public async applyRuntimeSettings(input: HubSettings | null): Promise<void> {
+        if (!this.managed) throw new Error('Vector runtime is not shell-managed');
+        const next = input ? normalizeSettings(input) : undefined;
+        if (next && (!next.apiKey || typeof next.apiKey !== 'string')) throw new Error('Embedding credential required');
+        const signature = crypto.createHash('sha256').update(JSON.stringify(next || null)).digest('hex');
+        if (signature === this._runtimeSignature) return;
+        const changed = this._modelKey(this._runtimeSettings) !== this._modelKey(next);
+        this._runtimeSettings = next;
+        this._runtimeSignature = signature;
+        this.hub.setEmbeddings(next ? this._embeddingsFactory(next) : undefined);
+        if (next && changed && (await this.hub.listProjects()).some(p => p.hasIndex)) void this._rebuildAll();
+    }
+
     /**
      * Switches the data directory at runtime: stops watchers, points the hub
      * at the new root (indexes there are simply absent until re-synced), and
@@ -237,6 +293,9 @@ export class HubManager {
      * continuous watcher.
      */
     public async import(sourceDir: string, projectName?: string, watch?: boolean): Promise<{ project: string; filesTracked: number }> {
+        // The managed product indexes only after promotion. A legacy watcher
+        // would race that completion boundary and expose half-written updates.
+        if (this.managed) watch = false;
         const real = await fs.promises.realpath(sourceDir);
         const stat = await fs.promises.stat(real);
         if (!stat.isDirectory()) {
@@ -255,6 +314,8 @@ export class HubManager {
         const filesTracked = await this.hub.syncFolder(project, real, { extensions: this.extensions });
         if (watch) {
             await this._startWatcher(project, real);
+        } else if (watch === false) {
+            await this._stopWatcher(project);
         }
         return { project, filesTracked };
     }
@@ -274,6 +335,15 @@ export class HubManager {
 
     /** Restores watchers for projects registered with `watch: true`. */
     public async resumeWatchers(): Promise<void> {
+        if (this.managed) {
+            let changed = false;
+            for (const [project, registration] of Object.entries(this._config.projects ?? {})) {
+                await this._stopWatcher(project);
+                if (registration.watch) { registration.watch = false; changed = true; }
+            }
+            if (changed) await this._saveConfig();
+            return;
+        }
         for (const [project, registration] of Object.entries(this._config.projects ?? {})) {
             if (registration.watch && registration.sourceDir && !this._watchers.has(project)) {
                 try {
@@ -330,7 +400,7 @@ export class HubManager {
                 await this._stopWatcher(name);
                 await this.hub.deleteProjectIndex(name);
                 await this.hub.syncFolder(name, sourceDir, { extensions: this.extensions });
-                if (this._config.projects![name].watch) {
+                if (!this.managed && this._config.projects![name].watch) {
                     await this._startWatcher(name, sourceDir);
                 }
             } catch (err: unknown) {
@@ -360,7 +430,9 @@ export class HubManager {
 
     private async _saveConfig(): Promise<void> {
         await fs.promises.mkdir(path.dirname(this.configPath), { recursive: true });
-        await fs.promises.writeFile(this.configPath, JSON.stringify(this._config, null, 2), 'utf8');
+        const temporary = `${this.configPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+        await fs.promises.writeFile(temporary, JSON.stringify(this._config, null, 2), { encoding: 'utf8', mode: 0o600 });
+        await fs.promises.rename(temporary, this.configPath);
     }
 }
 
