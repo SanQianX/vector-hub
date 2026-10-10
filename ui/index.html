@@ -436,6 +436,18 @@
   document.querySelectorAll('[data-i]').forEach(el => { el.outerHTML = iconSvg(el.dataset.i, el.dataset.s || 14); });
 
   function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function isRelativeKnowledgeLink(href) {
+    return typeof href === 'string' && !/^[\/\\]/.test(href) && !/[\\:\x00-\x1f?]/.test(href) && /^[^#]+\.md(?:#[^#]*)?$/i.test(href);
+  }
+  function resolveDocumentLink(base, href) {
+    if (!isRelativeKnowledgeLink(href)) throw new Error('不是相对知识文档链接。');
+    const normalized = base.replace(/\\/g, '/');
+    const baseUrl = new URL('file:///');
+    baseUrl.pathname = normalized.startsWith('/') ? normalized : '/' + normalized;
+    const resolved = new URL(href, baseUrl);
+    const pathname = decodeURIComponent(resolved.pathname);
+    return /^[A-Za-z]:\//.test(normalized) ? pathname.replace(/^\//, '').replace(/\//g, '\\') : pathname;
+  }
   function renderKnowledgeMarkdown(text) {
     const template = document.createElement('template');
     template.innerHTML = window.marked ? window.marked.parse(text, { breaks: false }) : '<pre>' + escapeHtml(text) + '</pre>';
@@ -445,8 +457,8 @@
       for (const attribute of [...node.attributes]) if (!['href', 'title'].includes(attribute.name) || node.tagName !== 'A') node.removeAttribute(attribute.name);
       if (node.tagName === 'A') {
         const href = node.getAttribute('href') || '';
-        if (!/^https?:\/\//i.test(href) && !/^#[A-Za-z0-9_-]+$/.test(href)) node.removeAttribute('href');
-        node.setAttribute('rel', 'noopener noreferrer'); node.setAttribute('target', '_blank');
+        if (!/^https?:\/\//i.test(href) && !/^#[A-Za-z0-9_-]+$/.test(href) && !isRelativeKnowledgeLink(href)) node.removeAttribute('href');
+        if (/^https?:\/\//i.test(href)) { node.setAttribute('rel', 'noopener noreferrer'); node.setAttribute('target', '_blank'); }
       }
     }
     return template.content;
@@ -778,14 +790,12 @@
   function wireDocLinks(project) {
     $('dr-body').querySelectorAll('a[href]').forEach(a => {
       const href = a.getAttribute('href');
-      if (!href || /^(https?:|#|mailto:)/.test(href)) { if (/^https?:/.test(href)) a.target = '_blank'; return; }
+      if (!isRelativeKnowledgeLink(href)) return;
       a.addEventListener('click', async (e) => {
         e.preventDefault();
         const base = $('drawer').dataset.uri;
-        const dir = base.slice(0, Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\')));
-        const resolved = new URL('file:///' + dir.replace(/\\/g, '/') + '/' + href.replace(/^\.\//, '')).pathname.replace(/^\/+/, '');
-        const abs = decodeURIComponent(resolved).replace(/\//g, '\\');
-        openDoc(project, abs, '');
+        try { openDoc(project, resolveDocumentLink(base, href), ''); }
+        catch { toast('知识文档链接无效。'); }
       });
     });
   }
