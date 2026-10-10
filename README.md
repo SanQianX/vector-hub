@@ -53,6 +53,8 @@ data/           运行时数据（每项目一个子文件夹 = 一个独立索�
 | DELETE | `/api/documents?project=&uri=` | 删除文档 |
 | POST | `/api/sync` | `{project, sourceDir}` 同步源文件夹（md/txt/html） |
 
+受管 HTTP 写入按项目排队，模型重建的删除和同步共享同一写入队列。索引恢复不会与同项目重建同时写入；失败不阻塞后续重试，不同项目仍可并行。控制台支持知识文档之间的相对 Markdown 链接，读取仍受服务器的项目目录边界限制。
+
 AI 侧调用示例：
 
 ```ts

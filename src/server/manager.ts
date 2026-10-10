@@ -94,6 +94,20 @@ export class HubManager {
     private readonly _embeddingsFactory: EmbeddingsFactory;
     private readonly _cliRootPath?: string;
     private _rebuild: RebuildStatus = { running: false, total: 0, done: 0, manual: [], errors: [] };
+    private readonly _projectWrites = new Map<string, Promise<unknown>>();
+
+    public async withProjectWrite<T>(project: string, write: () => Promise<T>): Promise<T> {
+        if (!VectorHub.isValidProjectName(project)) throw new Error(`Invalid project name: '${project}'`);
+        const previous = this._projectWrites.get(project) ?? Promise.resolve();
+        const job = previous.catch(() => undefined).then(write);
+        this._projectWrites.set(project, job);
+        try { return await job; }
+        finally { if (this._projectWrites.get(project) === job) this._projectWrites.delete(project); }
+    }
+
+    private async waitForWrites(): Promise<void> {
+        while (this._projectWrites.size) await Promise.all([...this._projectWrites.values()].map(job => job.catch(() => undefined)));
+    }
 
     private constructor(options: HubManagerOptions, hub: VectorHub, config: HubConfigFile) {
         this.configPath = options.configPath ?? defaultConfigPath();
@@ -225,6 +239,7 @@ export class HubManager {
         await this._saveConfig();
 
         let rebuild: RebuildStatus | undefined;
+        await this.waitForWrites();
 
         if (nextRoot != previousRoot) {
             await this._switchRoot(nextRoot);
@@ -266,6 +281,7 @@ export class HubManager {
         if (next && (!next.apiKey || typeof next.apiKey !== 'string')) throw new Error('Embedding credential required');
         const signature = crypto.createHash('sha256').update(JSON.stringify(next || null)).digest('hex');
         if (signature === this._runtimeSignature) return;
+        await this.waitForWrites();
         const changed = this._modelKey(this._runtimeSettings) !== this._modelKey(next);
         this._runtimeSettings = next;
         this._runtimeSignature = signature;
@@ -311,7 +327,7 @@ export class HubManager {
         this._config.projects[project] = { sourceDir: real, watch: watch ?? this._config.projects[project]?.watch };
         await this._saveConfig();
 
-        const filesTracked = await this.hub.syncFolder(project, real, { extensions: this.extensions });
+        const filesTracked = await this.withProjectWrite(project, () => this.hub.syncFolder(project, real, { extensions: this.extensions }));
         if (watch) {
             await this._startWatcher(project, real);
         } else if (watch === false) {
@@ -326,7 +342,7 @@ export class HubManager {
      */
     public async deleteProject(project: string): Promise<void> {
         await this._stopWatcher(project);
-        await this.hub.deleteProjectIndex(project);
+        await this.withProjectWrite(project, () => this.hub.deleteProjectIndex(project));
         if (this._config.projects?.[project] != undefined) {
             delete this._config.projects[project];
             await this._saveConfig();
@@ -398,8 +414,11 @@ export class HubManager {
             const sourceDir = this._config.projects![name].sourceDir!;
             try {
                 await this._stopWatcher(name);
-                await this.hub.deleteProjectIndex(name);
-                await this.hub.syncFolder(name, sourceDir, { extensions: this.extensions });
+                // Delete + rebuild is one write lease, shared with HTTP sync.
+                await this.withProjectWrite(name, async () => {
+                    await this.hub.deleteProjectIndex(name);
+                    await this.hub.syncFolder(name, sourceDir, { extensions: this.extensions });
+                });
                 if (!this.managed && this._config.projects![name].watch) {
                     await this._startWatcher(name, sourceDir);
                 }

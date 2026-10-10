@@ -2,6 +2,8 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
+import { createServer } from '../src/server/server';
 import { HubManager } from '../src/server/manager';
 import type { HubSettings, EmbeddingsFactory } from '../src/server/manager';
 import type { EmbeddingsModel, EmbeddingsResponse } from '@sanqianx/vectra';
@@ -52,6 +54,53 @@ describe('HubManager (global config + data root separation)', () => {
     async function makeManager(rootPath = root): Promise<HubManager> {
         return await HubManager.load({ rootPath, configPath, embeddingsFactory: mockFactory() });
     }
+
+    it('write queues preserve FIFO after failure without blocking another project', async () => {
+        const manager = await makeManager();
+        let release!: () => void, enter!: () => void;
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        const entered = new Promise<void>(resolve => { enter = resolve; });
+        const events: string[] = [];
+        const first = manager.withProjectWrite('a', async () => { events.push('a-start'); enter(); await gate; throw new Error('controlled failure'); });
+        const failed = assert.rejects(first, /controlled failure/);
+        await entered;
+        const next = manager.withProjectWrite('a', async () => { events.push('a-next'); return 2; });
+        try {
+            assert.equal(await manager.withProjectWrite('b', async () => { events.push('b'); return 3; }), 3);
+            assert.deepEqual(events, ['a-start', 'b']);
+        } finally { release(); }
+        await failed;
+        assert.equal(await next, 2);
+        assert.deepEqual(events, ['a-start', 'b', 'a-next']);
+    });
+
+    it('a promotion sync waits for the same-project model rebuild instead of racing its writer', async () => {
+        let enter!: () => void, release!: () => void;
+        const entered = new Promise<void>(resolve => { enter = resolve; });
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        const manager = await HubManager.load({ rootPath: root, configPath, managed: true, embeddingsFactory: settings => ({
+            maxTokens: 500,
+            async createEmbeddings(inputs) {
+                if (settings.model === 'new-model') { enter(); await gate; }
+                return { status: 'success', output: (Array.isArray(inputs) ? inputs : [inputs]).map(() => [1, 0]) };
+            },
+        }) });
+        await manager.applyRuntimeSettings({ provider: 'minimax', apiKey: 'test-only', model: 'old-model' });
+        await manager.import(sourceDir, 'project-race', false);
+        const server = http.createServer(createServer(manager));
+        await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+        try {
+            await manager.applyRuntimeSettings({ provider: 'minimax', apiKey: 'test-only', model: 'new-model' });
+            await entered;
+            const response = fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/api/sync`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project: 'project-race', sourceDir }) });
+            setTimeout(release, 80);
+            const result = await response;
+            assert.equal(result.status, 200, JSON.stringify(await result.json()));
+            await waitFor(() => !manager.rebuildStatus.running);
+            assert.equal(manager.rebuildStatus.errors.length, 0);
+            assert.equal((await manager.hub.listProjects()).find(p => p.name === 'project-race')?.docCount, 2);
+        } finally { release(); await waitFor(() => !manager.rebuildStatus.running); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+    });
 
     it('starts unconfigured and persists settings in the global config (not the data dir)', async () => {
         const manager = await makeManager();

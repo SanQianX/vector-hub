@@ -119,7 +119,7 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                     if (!body?.project || !body?.uri || typeof body.text != 'string') {
                         return sendJson(res, 400, { error: "Body must include 'project', 'uri' and 'text'." });
                     }
-                    await hub.upsertDocument(body);
+                    await manager.withProjectWrite(body.project, () => hub.upsertDocument(body));
                     return sendJson(res, 200, { ok: true, project: body.project, uri: body.uri });
                 }
 
@@ -129,7 +129,7 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                     if (!project || !uri) {
                         return sendJson(res, 400, { error: "Missing required query parameters 'project' and 'uri'." });
                     }
-                    const deleted = await hub.deleteDocument(project, uri);
+                    const deleted = await manager.withProjectWrite(project, () => hub.deleteDocument(project, uri));
                     return sendJson(res, deleted ? 200 : 404, { ok: deleted });
                 }
 
@@ -138,9 +138,9 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                     if (!body?.project || !body?.sourceDir) {
                         return sendJson(res, 400, { error: "Body must include 'project' and 'sourceDir'." });
                     }
-                    const count = await hub.syncFolder(body.project, body.sourceDir, {
+                    const count = await manager.withProjectWrite(body.project, () => hub.syncFolder(body.project, body.sourceDir, {
                         extensions: Array.isArray(body.extensions) ? body.extensions : undefined,
-                    });
+                    }));
                     return sendJson(res, 200, { ok: true, project: body.project, filesTracked: count });
                 }
 
