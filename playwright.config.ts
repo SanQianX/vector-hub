@@ -10,7 +10,7 @@ export default defineConfig({
     use: {
         baseURL: 'http://127.0.0.1:8791',
         channel: process.env.PW_CHANNEL || 'msedge',
-        viewport: { width: 1280, height: 720 },
+        viewport: { width: 1920, height: 1080 },
         locale: 'zh-CN',
     },
     globalSetup: require.resolve('./e2e/global-setup'),

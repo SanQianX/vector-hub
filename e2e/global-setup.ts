@@ -2,6 +2,7 @@ import { ChildProcess, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
 
 /**
  * E2E fixture: hermetic server on :8791 with mock embeddings
@@ -35,19 +36,10 @@ async function waitForHealth(url: string, timeoutMs = 30000): Promise<void> {
 }
 
 export default async function globalSetup(): Promise<E2EFixture> {
-    // Free :8791 from a stale run before spawning (Windows only guard).
-    if (process.platform == 'win32') {
-        try {
-            const out = spawnSync('netstat -ano | findstr :8791 | findstr LISTENING', { shell: true, encoding: 'utf8' }).stdout ?? '';
-            const pid = out.trim().split(/\s+/).pop() ?? '';
-            if (/^\d+$/.test(pid)) {
-                spawnSync('taskkill', ['/PID', pid, '/T', '/F'], { shell: true });
-                await new Promise((r) => setTimeout(r, 800));
-            }
-        } catch {
-            // port already free
-        }
-    }
+    // A test owns only children it created; never kill an unknown port owner.
+    const probe = net.createServer();
+    await new Promise<void>((resolve, reject) => { probe.once('error', reject); probe.listen(8791, '127.0.0.1', resolve); });
+    await new Promise<void>(resolve => probe.close(() => resolve()));
     const workDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'vector-hub-e2e-'));
     const seedDir = path.join(workDir, 'seed-kb');
     const dataRoot = path.join(workDir, 'data');
