@@ -39,6 +39,8 @@ export interface ProjectRegistration {
 export interface HubConfigFile {
     settings?: HubSettings;
     projects?: Record<string, ProjectRegistration>;
+    /** Hash of the last successfully indexed root/model, never a credential. */
+    indexIdentity?: string;
 }
 
 export interface RebuildStatus {
@@ -95,11 +97,13 @@ export class HubManager {
     private readonly _cliRootPath?: string;
     private _rebuild: RebuildStatus = { running: false, total: 0, done: 0, manual: [], errors: [] };
     private readonly _projectWrites = new Map<string, Promise<unknown>>();
+    private _runtimeChange: Promise<void> = Promise.resolve();
 
     public async withProjectWrite<T>(project: string, write: () => Promise<T>): Promise<T> {
         if (!VectorHub.isValidProjectName(project)) throw new Error(`Invalid project name: '${project}'`);
         const previous = this._projectWrites.get(project) ?? Promise.resolve();
-        const job = previous.catch(() => undefined).then(write);
+        const barrier = this._runtimeChange;
+        const job = Promise.all([previous.catch(() => undefined), barrier.catch(() => undefined)]).then(write);
         this._projectWrites.set(project, job);
         try { return await job; }
         finally { if (this._projectWrites.get(project) === job) this._projectWrites.delete(project); }
@@ -169,6 +173,12 @@ export class HubManager {
         const rootPath = path.resolve(
             options.rootPath ?? config.settings?.rootPath ?? process.env.VECTOR_HUB_ROOT ?? './data',
         );
+        if (options.managed) {
+            await fs.promises.mkdir(rootPath, { recursive: true, mode: 0o700 });
+            const stat = await fs.promises.lstat(rootPath);
+            if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Managed index storage must be a real directory');
+            await fs.promises.access(rootPath, fs.constants.W_OK);
+        }
         const factory = options.embeddingsFactory ?? defaultEmbeddingsFactory;
 
         const hub = new VectorHub({
@@ -275,18 +285,48 @@ export class HubManager {
         await this._saveConfig();
     }
 
-    public async applyRuntimeSettings(input: HubSettings | null): Promise<void> {
+    public async applyRuntimeSettings(input: HubSettings | null, storageRoot?: string): Promise<void> {
         if (!this.managed) throw new Error('Vector runtime is not shell-managed');
         const next = input ? normalizeSettings(input) : undefined;
         if (next && (!next.apiKey || typeof next.apiKey !== 'string')) throw new Error('Embedding credential required');
-        const signature = crypto.createHash('sha256').update(JSON.stringify(next || null)).digest('hex');
-        if (signature === this._runtimeSignature) return;
-        await this.waitForWrites();
-        const changed = this._modelKey(this._runtimeSettings) !== this._modelKey(next);
-        this._runtimeSettings = next;
-        this._runtimeSignature = signature;
-        this.hub.setEmbeddings(next ? this._embeddingsFactory(next) : undefined);
-        if (next && changed && (await this.hub.listProjects()).some(p => p.hasIndex)) void this._rebuildAll();
+        if (storageRoot !== undefined && (typeof storageRoot !== 'string' || !path.isAbsolute(storageRoot))) throw new Error('Absolute index storage directory required');
+        const signature = crypto.createHash('sha256').update(JSON.stringify({ next: next || null, storageRoot: storageRoot || null })).digest('hex');
+        const pending = [...this._projectWrites.values()];
+        const previous = this._runtimeChange;
+        const change = previous.catch(() => undefined).then(async () => {
+            if (signature === this._runtimeSignature) return;
+            if (this._rebuild.running) throw new Error('Index rebuild is running; retry configuration after completion');
+            // Only pre-change writers are awaited. New writers wait on this
+            // barrier, so they cannot touch a stale hub or deadlock the switch.
+            await Promise.all(pending.map(job => job.catch(() => undefined)));
+            const newRoot = storageRoot ? path.resolve(storageRoot) : this.hub.rootPath;
+            const rootChanged = newRoot !== this.hub.rootPath;
+            if (rootChanged) {
+                await fs.promises.mkdir(newRoot, { recursive: true, mode: 0o700 });
+                const stat = await fs.promises.lstat(newRoot);
+                if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Index storage must be a real directory');
+                await fs.promises.access(newRoot, fs.constants.W_OK);
+                const oldConfig = this._config.settings;
+                this._config.settings = { provider: 'minimax', apiKey: '', ...oldConfig, rootPath: newRoot };
+                try { await this._saveConfig(); } catch (error) { this._config.settings = oldConfig; throw error; }
+                await this._switchRoot(newRoot);
+            }
+            this._runtimeSettings = next;
+            this._runtimeSignature = signature;
+            this.hub.setEmbeddings(next ? this._embeddingsFactory(next) : undefined);
+            const identity = this._indexIdentity();
+            if (next && this._config.indexIdentity !== identity) {
+                if (Object.keys(this._config.projects ?? {}).length) void this._rebuildAll(true, identity);
+                else {
+                    const previousIdentity = this._config.indexIdentity;
+                    this._config.indexIdentity = identity;
+                    try { await this._saveConfig(); }
+                    catch (error) { this._config.indexIdentity = previousIdentity; this._runtimeSignature = ''; throw error; }
+                }
+            }
+        });
+        this._runtimeChange = change;
+        await change;
     }
 
     /**
@@ -397,43 +437,61 @@ export class HubManager {
      * current (new) embeddings model. Indexed projects without a sourceDir
      * are reported as `manual`.
      */
-    private async _rebuildAll(): Promise<void> {
+    private async _rebuildAll(includeMissing = false, identity?: string): Promise<void> {
         // Mark running synchronously so a caller that returns immediately
         // after triggering still observes the running state.
         this._rebuild = { running: true, total: 0, done: 0, manual: [], errors: [], startedAt: Date.now() };
 
-        const projects = await this.hub.listProjects();
-        const rebuildable = projects.filter((p) => p.hasIndex && this._config.projects?.[p.name]?.sourceDir);
-        const manual = projects.filter((p) => p.hasIndex && !this._config.projects?.[p.name]?.sourceDir).map((p) => p.name);
+        try {
+            const projects = await this.hub.listProjects();
+            const rebuildable = includeMissing
+                ? Object.entries(this._config.projects ?? {}).filter(([, registration]) => registration.sourceDir).map(([name]) => ({ name }))
+                : projects.filter((p) => p.hasIndex && this._config.projects?.[p.name]?.sourceDir);
+            const manual = projects.filter((p) => p.hasIndex && !this._config.projects?.[p.name]?.sourceDir).map((p) => p.name);
 
-        this._rebuild.total = rebuildable.length;
-        this._rebuild.manual = manual;
+            this._rebuild.total = rebuildable.length;
+            this._rebuild.manual = manual;
 
-        for (const { name } of rebuildable) {
-            this._rebuild.currentProject = name;
-            const sourceDir = this._config.projects![name].sourceDir!;
-            try {
-                await this._stopWatcher(name);
-                // Delete + rebuild is one write lease, shared with HTTP sync.
-                await this.withProjectWrite(name, async () => {
-                    await this.hub.deleteProjectIndex(name);
-                    await this.hub.syncFolder(name, sourceDir, { extensions: this.extensions });
-                });
-                if (!this.managed && this._config.projects![name].watch) {
-                    await this._startWatcher(name, sourceDir);
+            for (const { name } of rebuildable) {
+                this._rebuild.currentProject = name;
+                const sourceDir = this._config.projects![name].sourceDir!;
+                try {
+                    await this._stopWatcher(name);
+                    // Delete + rebuild is one write lease, shared with HTTP sync.
+                    await this.withProjectWrite(name, async () => {
+                        await this.hub.deleteProjectIndex(name);
+                        await this.hub.syncFolder(name, sourceDir, { extensions: this.extensions });
+                    });
+                    if (!this.managed && this._config.projects![name].watch) {
+                        await this._startWatcher(name, sourceDir);
+                    }
+                } catch (err: unknown) {
+                    this._rebuild.errors.push({
+                        project: name,
+                        message: err instanceof Error ? err.message : String(err),
+                    });
                 }
-            } catch (err: unknown) {
-                this._rebuild.errors.push({
-                    project: name,
-                    message: err instanceof Error ? err.message : String(err),
-                });
+                this._rebuild.done++;
             }
-            this._rebuild.done++;
-        }
 
-        this._rebuild.running = false;
-        this._rebuild.currentProject = undefined;
-        this._rebuild.finishedAt = Date.now();
+            if (identity && !this._rebuild.errors.length && identity === this._indexIdentity()) {
+                const previousIdentity = this._config.indexIdentity;
+                this._config.indexIdentity = identity;
+                try { await this._saveConfig(); }
+                catch (error) { this._config.indexIdentity = previousIdentity; throw error; }
+            }
+        } catch (error) {
+            this._rebuild.errors.push({ project: '', message: error instanceof Error ? error.message : String(error) });
+        } finally {
+            if (identity && this._rebuild.errors.length) this._runtimeSignature = '';
+            this._rebuild.running = false;
+            this._rebuild.currentProject = undefined;
+            this._rebuild.finishedAt = Date.now();
+        }
+    }
+
+    private _indexIdentity(): string {
+        return crypto.createHash('sha256').update(`${this.hub.rootPath}|${this._modelKey(this._runtimeSettings)}`).digest('hex');
     }
 
     private _modelKey(settings?: HubSettings): string {

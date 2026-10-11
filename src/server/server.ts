@@ -50,8 +50,8 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                 if (route === 'POST /api/internal/embedding-config') return sendJsonNoCors(res, 200, { settings: manager.legacyEmbeddingSettings(), migrationId: manager.embeddingMigrationId() });
                 if (route === 'POST /api/internal/runtime-config') {
                     const body = await readJsonBody(req);
-                    await manager.applyRuntimeSettings(body.settings ?? null);
-                    return sendJsonNoCors(res, 200, { ok: true });
+                    await manager.applyRuntimeSettings(body.settings ?? null, body.storageRoot);
+                    return sendJsonNoCors(res, 200, { ok: true, rootPath: manager.hub.rootPath });
                 }
                 if (route === 'POST /api/internal/retire-embedding') {
                     const body = await readJsonBody(req);
@@ -119,7 +119,7 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                     if (!body?.project || !body?.uri || typeof body.text != 'string') {
                         return sendJson(res, 400, { error: "Body must include 'project', 'uri' and 'text'." });
                     }
-                    await manager.withProjectWrite(body.project, () => hub.upsertDocument(body));
+                    await manager.withProjectWrite(body.project, () => manager.hub.upsertDocument(body));
                     return sendJson(res, 200, { ok: true, project: body.project, uri: body.uri });
                 }
 
@@ -129,7 +129,7 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                     if (!project || !uri) {
                         return sendJson(res, 400, { error: "Missing required query parameters 'project' and 'uri'." });
                     }
-                    const deleted = await manager.withProjectWrite(project, () => hub.deleteDocument(project, uri));
+                    const deleted = await manager.withProjectWrite(project, () => manager.hub.deleteDocument(project, uri));
                     return sendJson(res, deleted ? 200 : 404, { ok: deleted });
                 }
 
@@ -138,7 +138,7 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                     if (!body?.project || !body?.sourceDir) {
                         return sendJson(res, 400, { error: "Body must include 'project' and 'sourceDir'." });
                     }
-                    const count = await manager.withProjectWrite(body.project, () => hub.syncFolder(body.project, body.sourceDir, {
+                    const count = await manager.withProjectWrite(body.project, () => manager.hub.syncFolder(body.project, body.sourceDir, {
                         extensions: Array.isArray(body.extensions) ? body.extensions : undefined,
                     }));
                     return sendJson(res, 200, { ok: true, project: body.project, filesTracked: count });
