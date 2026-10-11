@@ -304,7 +304,7 @@ export class VectorHub {
         if (!(await index.isIndexCreated())) {
             await index.createIndex({ version: 1 });
         }
-        const result = await syncSourceFolder(index, sourceDir, options?.extensions);
+        const result = await syncSourceFolder(index, sourceDir, options?.extensions, options?.excludeDirectories);
         return result.filesTracked;
     }
 
@@ -327,6 +327,7 @@ export class VectorHub {
         const watcher = new KbFolderWatcher(index, path.resolve(sourceDir), {
             extensions: options?.extensions ?? ['.md', '.txt', '.html'],
             debounceMs: options?.debounceMs,
+            excludeDirectories: options?.excludeDirectories,
         });
         await watcher.start();
         return watcher;

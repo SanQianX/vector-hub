@@ -146,6 +146,8 @@ export interface UpsertDocumentOptions {
  * Options for `VectorHub.syncFolder()` / `VectorHub.watchFolder()`.
  */
 export interface SyncOptions {
+    /** Directory names excluded recursively from source synchronization. */
+    excludeDirectories?: string[];
     /**
      * File extensions to sync. Default `['.md', '.txt', '.html']`.
      */

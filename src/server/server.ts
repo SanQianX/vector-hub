@@ -139,7 +139,7 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                         return sendJson(res, 400, { error: "Body must include 'project' and 'sourceDir'." });
                     }
                     const count = await manager.withProjectWrite(body.project, () => manager.hub.syncFolder(body.project, body.sourceDir, {
-                        extensions: Array.isArray(body.extensions) ? body.extensions : undefined,
+                        ...(manager.managed ? manager.syncOptions : { extensions: Array.isArray(body.extensions) ? body.extensions : undefined }),
                     }));
                     return sendJson(res, 200, { ok: true, project: body.project, filesTracked: count });
                 }

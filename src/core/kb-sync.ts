@@ -184,7 +184,7 @@ export function buildDocument(absFilePath: string, rootDir: string, text: string
     };
 }
 
-async function* walkFiles(dir: string, extensions: Set<string>): AsyncAsyncGeneratorShim {
+async function* walkFiles(dir: string, extensions: Set<string>, excluded: Set<string>): AsyncAsyncGeneratorShim {
     let entries: fs.Dirent[];
     try {
         entries = await fs.promises.readdir(dir, { withFileTypes: true });
@@ -192,12 +192,12 @@ async function* walkFiles(dir: string, extensions: Set<string>): AsyncAsyncGener
         return;
     }
     for (const entry of entries) {
-        if (entry.name.startsWith('.')) {
+        if (entry.name.startsWith('.') || entry.isDirectory() && excluded.has(entry.name.toLowerCase())) {
             continue;
         }
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
-            yield* walkFiles(full, extensions);
+            yield* walkFiles(full, extensions, excluded);
         } else if (entry.isFile() && extensions.has(path.extname(entry.name).toLowerCase())) {
             yield full;
         }
@@ -222,12 +222,13 @@ export async function syncSourceFolder(
     index: LocalDocumentIndex,
     sourceDir: string,
     extensions: string[] = ['.md', '.txt', '.html'],
+    excludeDirectories: string[] = [],
 ): Promise<SyncFolderResult> {
     const root = path.resolve(sourceDir);
     const exts = new Set(extensions.map((e) => e.toLowerCase()));
 
     const diskFiles = new Set<string>();
-    for await (const file of walkFiles(root, exts)) {
+    for await (const file of walkFiles(root, exts, new Set(excludeDirectories.map(name => name.toLowerCase())))) {
         diskFiles.add(file);
         const text = await fs.promises.readFile(file, 'utf8');
         const doc = buildDocument(file, root, text);
@@ -261,7 +262,7 @@ export class KbFolderWatcher {
     public constructor(
         private readonly index: LocalDocumentIndex,
         private readonly sourceDir: string,
-        private readonly options: { extensions?: string[]; debounceMs?: number } = {},
+        private readonly options: { extensions?: string[]; debounceMs?: number; excludeDirectories?: string[] } = {},
     ) {}
 
     public get isRunning(): boolean {
@@ -273,7 +274,7 @@ export class KbFolderWatcher {
     }
 
     public async start(): Promise<void> {
-        const result = await syncSourceFolder(this.index, this.sourceDir, this.options.extensions);
+        const result = await syncSourceFolder(this.index, this.sourceDir, this.options.extensions, this.options.excludeDirectories);
         this._tracked = result.filesTracked;
         if (this._stopped) {
             return;
@@ -313,6 +314,8 @@ export class KbFolderWatcher {
     }
 
     private async _syncFile(absPath: string): Promise<void> {
+        const excluded = new Set(this.options.excludeDirectories?.map(name => name.toLowerCase()));
+        if (path.relative(this.sourceDir, absPath).split(path.sep).slice(0, -1).some(name => excluded.has(name.toLowerCase()))) return;
         const exts = new Set((this.options.extensions ?? ['.md', '.txt', '.html']).map((e) => e.toLowerCase()));
         try {
             const stat = await fs.promises.stat(absPath);

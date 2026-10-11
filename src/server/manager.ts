@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { VectorHub } from '../core/hub';
 import { createMiniMaxEmbeddings, createOpenAIEmbeddings } from '../core/embeddings';
 import { KbFolderWatcher } from '../core/kb-sync';
+import type { SyncOptions } from '../core/types';
 import type { EmbeddingsModel } from '@sanqianx/vectra';
 
 /**
@@ -211,7 +212,12 @@ export class HubManager {
 
     /** Effective sync extensions. */
     public get extensions(): string[] {
+        if (this.managed) return ['.md'];
         return this._config.settings?.extensions ?? DEFAULT_EXTENSIONS;
+    }
+
+    public get syncOptions(): SyncOptions {
+        return { extensions: this.extensions, ...(this.managed ? { excludeDirectories: ['dev-conversations', '_ai', '_backup', 'node_modules'] } : {}) };
     }
 
     /** Effective watch debounce. */
@@ -367,7 +373,7 @@ export class HubManager {
         this._config.projects[project] = { sourceDir: real, watch: watch ?? this._config.projects[project]?.watch };
         await this._saveConfig();
 
-        const filesTracked = await this.withProjectWrite(project, () => this.hub.syncFolder(project, real, { extensions: this.extensions }));
+        const filesTracked = await this.withProjectWrite(project, () => this.hub.syncFolder(project, real, this.syncOptions));
         if (watch) {
             await this._startWatcher(project, real);
         } else if (watch === false) {
@@ -460,7 +466,7 @@ export class HubManager {
                     // Delete + rebuild is one write lease, shared with HTTP sync.
                     await this.withProjectWrite(name, async () => {
                         await this.hub.deleteProjectIndex(name);
-                        await this.hub.syncFolder(name, sourceDir, { extensions: this.extensions });
+                        await this.hub.syncFolder(name, sourceDir, this.syncOptions);
                     });
                     if (!this.managed && this._config.projects![name].watch) {
                         await this._startWatcher(name, sourceDir);
@@ -491,7 +497,7 @@ export class HubManager {
     }
 
     private _indexIdentity(): string {
-        return crypto.createHash('sha256').update(`${this.hub.rootPath}|${this._modelKey(this._runtimeSettings)}`).digest('hex');
+        return crypto.createHash('sha256').update(`${this.hub.rootPath}|${this._modelKey(this._runtimeSettings)}${this.managed ? '|managed-markdown-no-evidence-v1' : ''}`).digest('hex');
     }
 
     private _modelKey(settings?: HubSettings): string {
