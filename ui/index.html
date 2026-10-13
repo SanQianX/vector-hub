@@ -649,10 +649,19 @@
         const found = await engineApi('search', { projectId: embedContext.projectId, scope: embedContext.scope, query: q, limit: $('topk').value || 10 });
         if (epoch !== searchEpoch) return;
         embedContext.results = found.results;
-        data = { tookMs: Math.round(performance.now() - started), projectsSearched: [...new Set(found.results.map(r => r.scope_project_id))], results: found.results.map(r => ({ project: r.scope_project_id, uri: r.entry_id, file: `${r.projectName || r.scope_project_id} / ${r.entry_id}`, score: r.relevance_score, snippet: r.chunk_text, commit: r.commitSha, docType: r.entry_id.startsWith('changes/') ? 'change' : r.entry_id.startsWith('modules/') ? 'module' : r.entry_id === 'GOAL.md' ? 'goal' : r.entry_id === 'ARCHITECTURE.md' ? 'architecture' : 'readme' })) };
+        data = { tookMs: Math.round(performance.now() - started), matchStatus: found.matchStatus, health: found.health, currentProjectStatus: found.currentProjectStatus,
+          projectsSearched: [...new Set(found.results.map(r => r.scope_project_id))], results: found.results.map(r => ({ project: r.scope_project_id, uri: r.entry_id,
+            file: `${r.projectName || r.scope_project_id} / ${r.entry_id}`, score: r.relevance_score, snippet: r.chunk_text, commit: r.commitSha,
+            matchReason: r.matchReason || '', sourceRole: r.scope_project_id === embedContext.projectId ? '本项目事实' : '跨项目参考',
+            docType: r.entry_id.startsWith('changes/') ? 'change' : r.entry_id.startsWith('modules/') ? 'module' : r.entry_id === 'GOAL.md' ? 'goal' : r.entry_id === 'ARCHITECTURE.md' ? 'architecture' : 'readme' })) };
         if (docTypes.length) data.results = data.results.filter(r => docTypes.includes(r.docType));
-        const seen = new Set();
-        data.results = data.results.filter(r => { const key = `${r.project}:${r.uri}:${r.commit || ''}`; if (seen.has(key)) return false; seen.add(key); return true; });
+        const grouped = new Map();
+        for (const row of data.results) {
+          const key = `${row.project}:${row.uri}:${row.commit || ''}`, previous = grouped.get(key);
+          if (previous) { if (!previous.snippets.includes(row.snippet)) previous.snippets.push(row.snippet); }
+          else grouped.set(key, { ...row, snippets: [row.snippet] });
+        }
+        data.results = [...grouped.values()];
       } else data = await api('/api/search?' + params.toString());
       if (epoch !== searchEpoch) return;
       renderResults(q, data, '/api/search?' + params.toString());
@@ -683,11 +692,14 @@
     }
     const errors = (data.errors || []).map(e => '<div class="empty" style="margin:0 0 8px"><div class="box" style="border-color:var(--red);padding:8px 14px"><div class="t2">项目 ' + escapeHtml(e.project) + ' 检索出错：' + escapeHtml(e.message) + '</div></div></div>').join('');
     if ((data.results || []).length == 0) {
-      el.innerHTML = errors + '<div class="empty"><div class="box"><div class="tile">' + iconSvg('doc', 18) + '</div><div class="t1">没有命中结果</div><div class="t2">' + (embedded ? '尝试切换知识范围、类型或改写问题。' : '试着切换类型过滤、降低阈值，或改写问题') + '</div></div></div>';
+      const note = embedded ? data.matchStatus === 'not-needed' ? '当前输入没有明确检索主题。' : data.currentProjectStatus?.note || '本次问题没有找到可靠匹配；这不代表知识库为空。' : '试着切换类型过滤、降低阈值，或改写问题';
+      el.innerHTML = errors + '<div class="empty"><div class="box"><div class="tile">' + iconSvg('doc', 18) + '</div><div class="t1">没有可靠匹配</div><div class="t2">' + escapeHtml(note) + '</div></div></div>';
       return;
     }
     const skipped = (data.projectsSkipped || []).length ? '（跳过未建索引：' + escapeHtml(data.projectsSkipped.join(', ')) + '）' : '';
-    el.innerHTML = errors + '<div class="res-meta"><span>' + data.results.length + (embedded ? ' 份知识' : ' 条结果 · ' + data.tookMs + 'ms · ' + (data.projectsSearched || []).length + ' 项目') + skipped + '</span><span>GET ' + escapeHtml(apiUrl.length > 90 ? apiUrl.slice(0, 90) + '…' : apiUrl) + '</span></div>';
+    if (embedded && ['degraded', 'unavailable', 'partial'].includes(data.health?.index)) el.innerHTML = errors + '<div class="res-meta">向量检索暂不可用，本次使用当前文件的文本匹配。</div>';
+    else el.innerHTML = errors;
+    el.innerHTML += '<div class="res-meta"><span>' + data.results.length + (embedded ? ' 份知识' : ' 条结果 · ' + data.tookMs + 'ms · ' + (data.projectsSearched || []).length + ' 项目') + skipped + '</span><span>' + (embedded ? '统一知识检索' : 'GET ' + escapeHtml(apiUrl.length > 90 ? apiUrl.slice(0, 90) + '…' : apiUrl)) + '</span></div>';
     for (const r of data.results) {
       const row = document.createElement('div');
       row.className = 'res';
@@ -697,6 +709,8 @@
       const r2 = [];
       if (r.date) r2.push(escapeHtml(r.date));
       if (r.commit) r2.push(escapeHtml(String(r.commit).slice(0, 7)));
+      if (r.sourceRole) r2.push(escapeHtml(r.sourceRole));
+      if (r.matchReason) r2.push(escapeHtml(r.matchReason));
       if (r.modules) r2.push('<span class="mods">' + truncList(r.modules) + '</span>');
       if (r.tags) r2.push(truncList(r.tags));
       row.innerHTML =
@@ -705,7 +719,7 @@
         '<span class="grow"></span><span class="score">' + Number(r.score).toFixed(3) + '</span>' +
         (r.chunkIndex ? '<span class="chunkpos">第' + r.chunkIndex + '/' + r.chunkCount + '块</span>' : '') + '</div>' +
         (r2.length ? '<div class="r2">' + r2.join('') + '</div>' : '') +
-        '<div class="r3">' + highlight(r.snippet, q) + '</div>';
+        (r.snippets || [r.snippet]).map(text => '<div class="r3">' + highlight(text, q) + '</div>').join('');
       row.addEventListener('click', () => openDoc(r.project, r.uri, r.snippet));
       el.appendChild(row);
     }

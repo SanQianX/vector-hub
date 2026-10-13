@@ -44,6 +44,10 @@ export interface ProjectInfo {
  * Options for `VectorHub.search()`.
  */
 export interface SearchOptions {
+    /** Opt-in verified chunk results. Default remains document-level. */
+    resultLevel?: 'document' | 'chunk';
+    /** Chunk mode preserves candidates independently for each requested project. */
+    perProjectLimit?: number;
     /**
      * Projects to search. Defaults to every project that has an index.
      */
@@ -90,6 +94,9 @@ export interface SearchOptions {
  * A single search hit.
  */
 export interface SearchResultItem {
+    scoreType?: 'cosine' | 'hybrid';
+    /** SHA-256 of LF-normalized indexed body, without leading blank lines. */
+    bodyHash?: string;
     /** Project (sub-folder) the document belongs to. */
     project: string;
     /** Document URI (absolute source path for synced folders). */
@@ -120,6 +127,9 @@ export interface SearchResultItem {
  * `GET /api/search`.
  */
 export interface SearchResponse {
+    resultLevel?: 'document' | 'chunk';
+    model?: string;
+    dimensions?: number;
     query: string;
     results: SearchResultItem[];
     /** Projects that were actually queried. */

@@ -1,6 +1,7 @@
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { LocalDocumentIndex, LocalFileStorage } from '@sanqianx/vectra';
-import type { EmbeddingsModel, FileStorage, LocalDocumentResult } from '@sanqianx/vectra';
+import type { EmbeddingsModel, EmbeddingsResponse, FileStorage, LocalDocumentResult } from '@sanqianx/vectra';
 import { KbFolderWatcher, syncSourceFolder } from './kb-sync';
 import type {
     ProjectInfo,
@@ -38,6 +39,8 @@ export class VectorHub {
     private _embeddings: EmbeddingsModel | undefined;
     private readonly _storage: FileStorage;
     private readonly _indexes = new Map<string, LocalDocumentIndex>();
+    private readonly _queryCache = new Map<string, { until: number; value: Promise<EmbeddingsResponse> }>();
+    private _queryDimensions = 0;
     /** Projects whose BM25 build failed once (e.g. vectra's "Invalid string
      * length" on large corpora) — skip straight to semantic for them. */
     private readonly _bm25Broken = new Set<string>();
@@ -60,6 +63,8 @@ export class VectorHub {
     public setEmbeddings(model: EmbeddingsModel | undefined): void {
         this._embeddings = model;
         this._indexes.clear();
+        this._queryCache.clear();
+        this._queryDimensions = 0;
     }
 
     /** Absolute path of the hub root folder. */
@@ -104,14 +109,34 @@ export class VectorHub {
         }
         let index = this._indexes.get(project);
         if (index == undefined) {
+            const model = this._embeddings;
+            const sharedQueries: EmbeddingsModel | undefined = model ? {
+                maxTokens: model.maxTokens,
+                createEmbeddings: inputs => typeof inputs === 'string' ? this._queryEmbedding(model, inputs) : model.createEmbeddings(inputs),
+            } : undefined;
             index = new LocalDocumentIndex({
                 folderPath: path.join(this._rootPath, project),
-                embeddings: this._embeddings,
+                embeddings: sharedQueries,
                 storage: this._storage,
             });
             this._indexes.set(project, index);
         }
         return index;
+    }
+
+    private _queryEmbedding(model: EmbeddingsModel, text: string): Promise<EmbeddingsResponse> {
+        if (model !== this._embeddings) return model.createEmbeddings(text);
+        const key = crypto.createHash('sha256').update(text).digest('hex');
+        const previous = this._queryCache.get(key);
+        if (previous && previous.until > Date.now()) return previous.value;
+        const value = model.createEmbeddings(text).then(result => {
+            if (result.status !== 'success') this._queryCache.delete(key);
+            else if (model === this._embeddings) this._queryDimensions = result.output?.[0]?.length || 0;
+            return result;
+        }, error => { this._queryCache.delete(key); throw error; });
+        this._queryCache.set(key, { until: Date.now() + 30000, value });
+        while (this._queryCache.size > 100) this._queryCache.delete(this._queryCache.keys().next().value!);
+        return value;
     }
 
     /**
@@ -228,7 +253,7 @@ export class VectorHub {
 
         const settled = await Promise.allSettled(
             candidates.map(({ name, index }) => {
-                const useBm25 = opts.isBm25 && !this._bm25Broken.has(name);
+                const useBm25 = opts.resultLevel !== 'chunk' && opts.isBm25 && !this._bm25Broken.has(name);
                 return index
                     .queryDocuments(query, {
                         maxDocuments: opts.maxDocuments,
@@ -274,16 +299,21 @@ export class VectorHub {
             }
             const { name, index, results } = outcome.value;
             for (const result of results) {
-                items.push(await this._toResultItem(name, index, result, opts.snippetTokens));
+                if (opts.resultLevel === 'chunk') items.push(...await this._toChunkItems(name, result));
+                else items.push(await this._toResultItem(name, index, result, opts.snippetTokens));
             }
         }
 
-        const results = items
+        const ranked = items
             .filter((item) => item.score >= opts.minScore)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, opts.maxResults);
+            .sort((a, b) => b.score - a.score);
+        const perProject = Math.min(50, Math.max(1, Number(opts.perProjectLimit) || 20));
+        const results = opts.resultLevel === 'chunk' && opts.perProjectLimit
+            ? candidates.flatMap(c => ranked.filter(r => r.project === c.name).slice(0, perProject))
+            : ranked.slice(0, opts.maxResults);
 
         return {
+            ...(opts.resultLevel === 'chunk' ? { resultLevel: 'chunk' as const, model: this.embeddingsModelName, dimensions: this._queryDimensions } : {}),
             query,
             results,
             projectsSearched: candidates.map((candidate) => candidate.name),
@@ -291,6 +321,27 @@ export class VectorHub {
             errors,
             tookMs: Date.now() - start,
         };
+    }
+
+    private async _toChunkItems(project: string, result: LocalDocumentResult): Promise<SearchResultItem[]> {
+        const raw = await result.loadText();
+        const lf = raw.replace(/\r\n/g, '\n');
+        const leading = /^\n*/.exec(lf)![0].length;
+        const body = lf.slice(leading);
+        const hash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
+        const chunks = [...result.chunks].sort((a, b) => b.score - a.score);
+        const items: SearchResultItem[] = [];
+        for (const chunk of chunks) {
+            const meta = chunk.item.metadata;
+            const rawStart = Number(meta.startPos), rawEnd = Number(meta.endPos) + 1;
+            if (!Number.isInteger(rawStart) || !Number.isInteger(rawEnd) || rawStart < 0 || rawEnd <= rawStart || rawEnd > raw.length || !Number.isFinite(chunk.score)) continue;
+            const startPos = Math.max(0, raw.slice(0, rawStart).replace(/\r\n/g, '\n').length - leading);
+            const endPos = Math.max(startPos, raw.slice(0, rawEnd).replace(/\r\n/g, '\n').length - leading);
+            items.push({ project, uri: result.uri, file: result.uri.split(/[\\/]/).pop() || result.uri,
+                score: chunk.score, scoreType: 'cosine', bodyHash: hash, startPos, endPos,
+                snippet: body.slice(startPos, endPos).trim(), ...(typeof meta.docType === 'string' ? { docType: meta.docType } : {}) });
+        }
+        return items;
     }
 
     /**

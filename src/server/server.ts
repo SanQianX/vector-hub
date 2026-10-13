@@ -97,6 +97,8 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                         maxDocuments: parseNumber(url.searchParams.get('maxDocuments')),
                         minScore: parseNumber(url.searchParams.get('minScore')),
                         isBm25: url.searchParams.get('isBm25') == 'true',
+                        resultLevel: url.searchParams.get('resultLevel') === 'chunk' ? 'chunk' : 'document',
+                        perProjectLimit: parseNumber(url.searchParams.get('perProjectLimit')),
                     });
                     return sendJson(res, 200, response);
                 }

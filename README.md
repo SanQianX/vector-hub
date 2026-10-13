@@ -1,5 +1,10 @@
 # vector-hub
 
+Knowledge-engine integrations may opt into `GET /api/search?resultLevel=chunk&perProjectLimit=30`.
+Chunk results use cosine scores, LF-normalized indexed-body SHA-256, and half-open UTF-16 character ranges (`startPos`, `endPos`). Document mode remains the default.
+Per-project candidate limits prevent a large project from eliminating another project's candidates before the engine applies its scope policy.
+Query embeddings are shared across projects and cached in memory for 30 seconds (100 hashed keys maximum); changing models clears the cache. Indexing still uses document embeddings independently.
+
 通用向量检索库 + 可视化控制台，基于 [Vectra](https://github.com/Stevenic/vectra) 构建。
 
 智脑托管模式的索引位置由外壳知识根目录派生（`<knowledge>/.indexes`）。鉴权的运行配置可以切换索引根目录：等待当前写入完成，后续写入使用新目录，并从登记的知识文件重建；旧索引原样保留。配置和凭据不随索引目录搬动，运行期密钥不落盘。独立运行的目录设置仍按原契约工作。
