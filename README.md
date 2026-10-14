@@ -3,7 +3,7 @@
 Knowledge-engine integrations may opt into `GET /api/search?resultLevel=chunk&perProjectLimit=30`.
 Chunk results use cosine scores, LF-normalized indexed-body SHA-256, and half-open UTF-16 character ranges (`startPos`, `endPos`). Document mode remains the default.
 Per-project candidate limits prevent a large project from eliminating another project's candidates before the engine applies its scope policy.
-Query embeddings are shared across projects and cached in memory for 30 seconds (100 hashed keys maximum); changing models clears the cache. Indexing still uses document embeddings independently.
+Query embeddings are shared across projects and cached in memory for 10 minutes (100 hashed keys maximum); changing models clears the cache. Indexing still uses document embeddings independently.
 
 通用向量检索库 + 可视化控制台，基于 [Vectra](https://github.com/Stevenic/vectra) 构建。
 

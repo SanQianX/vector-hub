@@ -129,14 +129,22 @@ export class VectorHub {
         const key = crypto.createHash('sha256').update(text).digest('hex');
         const previous = this._queryCache.get(key);
         if (previous && previous.until > Date.now()) return previous.value;
+        // Only the promise that owns the current entry may delete it: a late
+        // failure from an expired, evicted, or swapped-out request must not
+        // destroy the replacement entry cached for the same text.
         const value = model.createEmbeddings(text).then(result => {
-            if (result.status !== 'success') this._queryCache.delete(key);
+            if (result.status !== 'success') this.deleteEntryIfOwned(key, value);
             else if (model === this._embeddings) this._queryDimensions = result.output?.[0]?.length || 0;
             return result;
-        }, error => { this._queryCache.delete(key); throw error; });
-        this._queryCache.set(key, { until: Date.now() + 30000, value });
+        }, error => { this.deleteEntryIfOwned(key, value); throw error; });
+        this._queryCache.set(key, { until: Date.now() + 600000, value });
         while (this._queryCache.size > 100) this._queryCache.delete(this._queryCache.keys().next().value!);
         return value;
+    }
+
+    private deleteEntryIfOwned(key: string, owner: Promise<EmbeddingsResponse>): void {
+        const entry = this._queryCache.get(key);
+        if (entry && entry.value === owner) this._queryCache.delete(key);
     }
 
     /**
