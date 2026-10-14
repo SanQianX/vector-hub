@@ -13,7 +13,7 @@ import { LocalDocument } from '@sanqianx/vectra';
 export interface VectorHubServerOptions {
     /**
      * Path to the visual console HTML file. Defaults to the bundled
-     * `ui/index.html`, resolved from the package layout or the cwd.
+     * `ui/index.html`, resolved from the module location.
      */
     uiPath?: string;
     runtimeToken?: string;
@@ -30,12 +30,14 @@ export interface VectorHubServerOptions {
  * the server can query the hub identically.
  */
 export function createServer(manager: HubManager, options?: VectorHubServerOptions): http.RequestListener {
-    const uiCandidates = [
-        options?.uiPath,
+    const uiCandidates = options?.uiPath != undefined
+        ? [path.resolve(options.uiPath)]
+        : [
         // dist/cjs/server/server.js → <package root>/ui/index.html
         path.resolve(__dirname, '../../../ui/index.html'),
-        path.resolve(process.cwd(), 'ui/index.html'),
-    ].filter((candidate): candidate is string => candidate != undefined);
+            // src/server/server.ts -> <repo>/ui/index.html
+            path.resolve(__dirname, '../../ui/index.html'),
+        ];
 
     return async (req, res) => {
         const url = new URL(req.url ?? '/', 'http://localhost');
@@ -68,8 +70,13 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
                 case 'GET /index.html':
                     return await serveUi(res, uiCandidates);
 
-                case 'GET /vendor/marked.min.js':
-                    return await serveStatic(res, path.resolve(path.dirname(uiCandidatesFallback(uiCandidates)), 'vendor', 'marked.min.js'), 'application/javascript; charset=utf-8');
+                case 'GET /vendor/marked.min.js': {
+                    const chosen = firstExistingUi(uiCandidates);
+                    if (!chosen) {
+                        return sendJson(res, 500, { error: 'ui/index.html not found. Pass ServerOptions.uiPath.' });
+                    }
+                    return await serveStatic(res, path.resolve(path.dirname(chosen), 'vendor', 'marked.min.js'), 'application/javascript; charset=utf-8');
+                }
 
                 case 'GET /api/projects': {
                     const projects = await hub.listProjects();
@@ -262,25 +269,23 @@ export function createServer(manager: HubManager, options?: VectorHubServerOptio
 }
 
 async function serveUi(res: http.ServerResponse, candidates: string[]): Promise<void> {
-    for (const candidate of candidates) {
-        if (fs.existsSync(candidate)) {
-            let html = await fs.promises.readFile(candidate, 'utf8');
-            const version = appVersion();
-            if (version) {
-                html = html.replaceAll('__APP_VERSION__', version);
-            }
-            res.writeHead(200, {
-                'Content-Type': 'text/html; charset=utf-8',
-                // The console page is injected per boot (version token); never
-                // let a browser serve a stale copy after a server restart.
-                'Cache-Control': 'no-store',
-                ...corsHeaders(),
-            });
-            res.end(html);
-            return;
-        }
+    const chosen = firstExistingUi(candidates);
+    if (!chosen) {
+        return sendJson(res, 500, { error: 'ui/index.html not found. Pass ServerOptions.uiPath.' });
     }
-    sendJson(res, 500, { error: 'ui/index.html not found. Pass ServerOptions.uiPath.' });
+    let html = await fs.promises.readFile(chosen, 'utf8');
+    const version = appVersion();
+    if (version) {
+        html = html.replaceAll('__APP_VERSION__', version);
+    }
+    res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        // The console page is injected per boot (version token); never
+        // let a browser serve a stale copy after a server restart.
+        'Cache-Control': 'no-store',
+        ...corsHeaders(),
+    });
+    res.end(html);
 }
 
 let cachedVersion: string | null = null;
@@ -292,15 +297,21 @@ function appVersion(): string {
     }
     const candidates = [
         path.resolve(__dirname, '../../package.json'), // src/ layout (tsx)
-        path.resolve(__dirname, '../../../package.json'), // dist/cjs/server layout
+        path.resolve(__dirname, '../../../package.json'), // dist/<format>/server layout
         path.resolve(process.cwd(), 'package.json'),
     ];
-    try {
-        const found = candidates.find((candidate) => fs.existsSync(candidate));
-        cachedVersion = found ? String(JSON.parse(fs.readFileSync(found, 'utf8'))?.version ?? '') : '';
-    } catch {
-        cachedVersion = '';
+    for (const candidate of candidates) {
+        try {
+            const version = String(JSON.parse(fs.readFileSync(candidate, 'utf8'))?.version ?? '');
+            if (version) {
+                cachedVersion = version;
+                return version;
+            }
+        } catch {
+            // Try the next candidate.
+        }
     }
+    cachedVersion = '';
     return cachedVersion;
 }
 
@@ -314,8 +325,8 @@ async function serveStatic(res: http.ServerResponse, filePath: string, contentTy
     }
 }
 
-function uiCandidatesFallback(candidates: string[]): string {
-    return candidates[candidates.length - 1] ?? path.resolve(process.cwd(), 'ui', 'index.html');
+function firstExistingUi(candidates: string[]): string | undefined {
+    return candidates.find((candidate) => fs.existsSync(candidate));
 }
 
 function readJsonBody(req: http.IncomingMessage): Promise<any> {
