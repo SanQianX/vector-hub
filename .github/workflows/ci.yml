@@ -63,3 +63,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm pack --dry-run
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  vectra:
+    name: Vendored vectra / Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.x'
+          # vectra keeps its own lockfile and node_modules; caching keyed on
+          # the root lockfile does not apply here.
+          package-manager-cache: false
+      # The vendored fork installs strictly from its own tracked lockfile
+      # into its own tree, so the root dependency versions cannot drift.
+      - name: Install vendored vectra from its own lockfile
+        run: npm ci --prefix packages/vectra
+      - run: npm run build:vectra
+      - run: npm run test:vectra
