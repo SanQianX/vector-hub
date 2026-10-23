@@ -1,28 +1,57 @@
 name: Publish to npm
-
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  id-token: write
-
 jobs:
   publish:
+    if: github.repository == 'SanQianX/vector-hub'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Publish
-        run: npm publish --provenance
+          node-version: '24.x'
+          # No registry-url: it writes an empty _authToken placeholder to
+          # ~/.npmrc which suppresses npm's OIDC auto-detection. The public
+          # npm registry is the default.
+          package-manager-cache: false
+      - name: Refuse tags that do not match package.json version
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "Refusing to publish: tag ${GITHUB_REF_NAME} does not match package version v${version}."
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      # Prerelease versions (any '-' suffix) must publish under the next
+      # dist-tag: npm never reroutes prereleases away from latest on its own.
+      - name: Pack once and publish exactly that tarball
+        run: |
+          set -euo pipefail
+          tarball=$(npm pack --silent)
+          echo "packed ${tarball}"
+          if [ ! -f "${tarball}" ]; then
+            echo "npm pack did not produce the expected tarball."
+            exit 1
+          fi
+          version=$(node -p "require('./package.json').version")
+          case "${version}" in
+            *-*) dist_tag=next ;;
+            *) dist_tag=latest ;;
+          esac
+          # Trusted publishing (OIDC): npm's auto flow needs npm 11.5+
+          # (npm 12 dropped --auth-type=oidc). Requires the package's
+          # trusted publishing to be configured on npmjs.com - unverified
+          # from this repository.
+          npm install -g npm@11
+          # Provenance requires a public repository field (added above) and
+          # a supported cloud CI provider; --access public is mandatory for
+          # the first publish of a scoped package.
+          npm publish "${tarball}" --access public --tag "${dist_tag}" --provenance --loglevel verbose
