@@ -3,7 +3,7 @@ name: Non-release validation
 on:
   push:
     branches:
-      - '**'
+      - 'main'
   pull_request:
 
 permissions:
